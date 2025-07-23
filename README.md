@@ -4,7 +4,7 @@
 
 ## Overview
 
-UnifiedIntelligence is a powerful Model Control Protocol (MCP) server that provides cognitive architecture and thought processing capabilities. It enables AI systems to:
+UnifiedIntelligence is a powerful Model Context Protocol (MCP) server that provides cognitive architecture and thought processing capabilities. It enables AI systems to:
 
 - Store and retrieve complex thoughts with metadata
 - Process thoughts using various cognitive frameworks  
