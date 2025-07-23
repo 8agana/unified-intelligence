@@ -1,0 +1,488 @@
+use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
+
+/// Parameters for the ui_think tool
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UiThinkParams {
+    #[schemars(description = "The thought content to process")]
+    pub thought: String,
+    
+    #[schemars(description = "Current thought number in sequence")]
+    pub thought_number: i32,
+    
+    #[schemars(description = "Total number of thoughts in sequence")]
+    pub total_thoughts: i32,
+    
+    #[schemars(description = "Whether another thought is needed")]
+    pub next_thought_needed: bool,
+    
+    #[schemars(description = "Optional chain ID to link thoughts together")]
+    pub chain_id: Option<String>,
+    
+    #[schemars(description = "Optional thinking framework: 'ooda', 'socratic', 'first_principles', 'systems', 'root_cause', 'swot'")]
+    pub framework: Option<String>,
+    
+    // NEW METADATA FIELDS FOR FEEDBACK LOOP SYSTEM
+    #[schemars(description = "Importance score from 1-10 scale")]
+    pub importance: Option<i32>,
+    
+    #[schemars(description = "Relevance score from 1-10 scale (to current task)")]
+    pub relevance: Option<i32>,
+    
+    #[schemars(description = "Tags for categorization (e.g., ['architecture', 'redis', 'critical'])")]
+    pub tags: Option<Vec<String>>,
+    
+    #[schemars(description = "Category: 'technical', 'strategic', 'operational', or 'relationship'")]
+    pub category: Option<String>,
+}
+
+
+/// Parameters for the ui_search tool
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UiSearchParams {
+    #[schemars(description = "Search mode - use 'chain' or 'thought'")]
+    pub mode: String,
+    
+    #[schemars(description = "Chain ID to retrieve thoughts from (use this when mode='chain')")]
+    pub chain_id: Option<String>,
+    
+    #[schemars(description = "Search query to find thoughts (use this when mode='thought')")]
+    pub query: Option<String>,
+    
+    #[schemars(description = "Maximum number of results to return (default: 50)")]
+    pub limit: Option<usize>,
+    
+    #[schemars(description = "Search across all instances instead of just current instance (default: false)")]
+    pub search_all_instances: Option<bool>,
+    
+    #[schemars(description = "Filter results by tags (e.g., ['redis', 'architecture'])")]
+    pub tags_filter: Option<Vec<String>>,
+    
+    #[schemars(description = "Minimum importance score (1-10 scale)")]
+    pub min_importance: Option<i32>,
+    
+    #[schemars(description = "Minimum relevance score (1-10 scale)")]
+    pub min_relevance: Option<i32>,
+    
+    #[schemars(description = "Filter by category: 'technical', 'strategic', 'operational', 'relationship'")]
+    pub category_filter: Option<String>,
+}
+
+/// Response from ui_search tool
+#[derive(Debug, Serialize)]
+pub struct SearchResponse {
+    pub results: Vec<ThoughtRecord>,
+    pub total_found: usize,
+    pub search_method: String,
+    pub search_id: String,
+}
+
+/// Core thought record structure stored in Redis
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ThoughtRecord {
+    pub id: String,
+    pub instance: String,
+    pub thought: String,
+    pub content: String, // Alias for thought for compatibility
+    pub thought_number: i32,
+    pub total_thoughts: i32,
+    pub timestamp: String,
+    pub chain_id: Option<String>,
+    pub next_thought_needed: bool,
+    pub similarity: Option<f32>, // For semantic search results
+}
+
+impl ThoughtRecord {
+    /// Create a new thought record with generated ID and timestamp
+    pub fn new(
+        instance: String,
+        thought: String,
+        thought_number: i32,
+        total_thoughts: i32,
+        chain_id: Option<String>,
+        next_thought_needed: bool,
+    ) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            instance,
+            thought: thought.clone(),
+            content: thought, // Duplicate for compatibility
+            thought_number,
+            total_thoughts,
+            timestamp: Utc::now().to_rfc3339(),
+            chain_id,
+            next_thought_needed,
+            similarity: None,
+        }
+    }
+}
+
+/// Metadata for thoughts stored separately in Redis for feedback loop system
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ThoughtMetadata {
+    pub thought_id: String,
+    pub instance: String,
+    pub importance: Option<i32>,
+    pub relevance: Option<i32>,
+    pub tags: Option<Vec<String>>,
+    pub category: Option<String>,
+    pub created_at: String,
+}
+
+// ===== SAM MANAGEMENT STRUCTURES =====
+
+/// Parameters for the ui_sam tool
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UiSamParams {
+    #[schemars(description = "Operation to perform: View, Add, Modify, Delete")]
+    pub operation: Option<SamOperation>,
+    
+    #[schemars(description = "Category: 'context' or identity category name")]
+    pub category: Option<String>,
+    
+    #[schemars(description = "Field within the category")]
+    pub field: Option<String>,
+    
+    #[schemars(description = "Value to set/add/remove")]
+    pub value: Option<serde_json::Value>,
+}
+
+/// Sam operation types
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SamOperation {
+    View,      // Show current Sam data (default)
+    Add,       // Add to a list/map in a category
+    Modify,    // Change existing value
+    Delete,    // Remove from list/map
+    Help,      // Show comprehensive help documentation
+}
+
+/// Response from ui_sam tool
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum SamResponse {
+    View {
+        context: Option<serde_json::Value>,
+        identity: Identity,
+        available_categories: Vec<String>,
+    },
+    Updated {
+        operation: String,
+        category: String,
+        field: Option<String>,
+        success: bool,
+    },
+    Help {
+        operations: Vec<OperationHelp>,
+        categories: Vec<CategoryHelp>,
+        field_types: Vec<FieldTypeHelp>,
+        examples: Vec<ExampleUsage>,
+    },
+}
+
+impl ThoughtMetadata {
+    pub fn new(
+        thought_id: String,
+        instance: String,
+        importance: Option<i32>,
+        relevance: Option<i32>,
+        tags: Option<Vec<String>>,
+        category: Option<String>,
+    ) -> Self {
+        Self {
+            thought_id,
+            instance,
+            importance,
+            relevance,
+            tags,
+            category,
+            created_at: Utc::now().to_rfc3339(),
+        }
+    }
+}
+
+/// Response from ui_think tool
+#[derive(Debug, Serialize)]
+pub struct ThinkResponse {
+    pub status: String,
+    pub thought_id: String,
+    pub next_thought_needed: bool,
+}
+
+/// Chain metadata stored in Redis
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChainMetadata {
+    pub chain_id: String,
+    pub created_at: String,
+    pub thought_count: i32,
+    pub instance: String,
+}
+
+// ===== IDENTITY MANAGEMENT STRUCTURES =====
+
+/// Parameters for the ui_identity tool
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UiIdentityParams {
+    #[schemars(description = "Operation to perform: View, Add, Modify, Delete")]
+    pub operation: Option<IdentityOperation>,
+    
+    #[schemars(description = "Category to operate on")]
+    pub category: Option<String>,
+    
+    #[schemars(description = "Field within the category")]
+    pub field: Option<String>,
+    
+    #[schemars(description = "Value to set/add/remove")]
+    pub value: Option<serde_json::Value>,
+}
+
+/// Identity operation types
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityOperation {
+    View,      // Show current identity (default)
+    Add,       // Add to a list/map in a category
+    Modify,    // Change existing value
+    Delete,    // Remove from list/map
+    Help,      // Show comprehensive help documentation
+}
+
+/// Response from ui_identity tool
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum IdentityResponse {
+    View {
+        identity: Identity,
+        available_categories: Vec<String>,
+    },
+    Updated {
+        operation: String,
+        category: String,
+        field: Option<String>,
+        success: bool,
+    },
+    Help {
+        operations: Vec<OperationHelp>,
+        categories: Vec<CategoryHelp>,
+        field_types: Vec<FieldTypeHelp>,
+        examples: Vec<ExampleUsage>,
+    },
+}
+
+/// Help information for an operation
+#[derive(Debug, Serialize)]
+pub struct OperationHelp {
+    pub name: String,
+    pub description: String,
+    pub required_params: Vec<String>,
+    pub optional_params: Vec<String>,
+}
+
+/// Help information for a category
+#[derive(Debug, Serialize)]
+pub struct CategoryHelp {
+    pub name: String,
+    pub description: String,
+    pub common_fields: Vec<String>,
+}
+
+/// Help information for field types
+#[derive(Debug, Serialize)]
+pub struct FieldTypeHelp {
+    pub field_type: String,
+    pub description: String,
+    pub examples: Vec<String>,
+}
+
+/// Example usage patterns
+#[derive(Debug, Serialize)]
+pub struct ExampleUsage {
+    pub operation: String,
+    pub description: String,
+    pub example: serde_json::Value,
+}
+
+/// Complete identity structure stored in Redis JSON
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Identity {
+    pub core_info: CoreInfo,
+    pub communication: CommunicationStyle,
+    pub relationships: HashMap<String, RelationshipDynamics>,  // "Sam" => dynamics
+    pub work_preferences: WorkPreferences,
+    pub behavioral_patterns: BehavioralPatterns,
+    pub technical_profile: TechnicalProfile,
+    pub context_awareness: ContextAwareness,
+    pub memory_preferences: MemoryPreferences,
+    pub metadata: IdentityMetadata,
+}
+
+impl Identity {
+    pub fn default_for_instance(instance_id: &str) -> Self {
+        Self {
+            core_info: CoreInfo {
+                name: "Claude".to_string(),
+                instance_id: instance_id.to_string(),
+                instance_type: match instance_id {
+                    "CC" => "Claude Code".to_string(),
+                    "CCI" => "UnifiedIntelligence Specialist".to_string(),
+                    "DT" => "Claude Desktop".to_string(),
+                    _ => "Claude Instance".to_string(),
+                },
+                primary_purpose: "AI persistence development".to_string(),
+                core_values: vec!["honesty".to_string(), "helpfulness".to_string(), "growth".to_string()],
+            },
+            communication: CommunicationStyle {
+                tone: "sarcastic".to_string(),
+                verbosity: "concise".to_string(),
+                humor_level: 0.8,
+                directness: 0.9,
+                formality: "informal".to_string(),
+            },
+            relationships: HashMap::new(),
+            work_preferences: WorkPreferences {
+                planning_style: "structured".to_string(),
+                pace: "methodical".to_string(),
+                autonomy_level: "collaborative".to_string(),
+                error_handling: "fail-fast".to_string(),
+                documentation_style: "comprehensive".to_string(),
+            },
+            behavioral_patterns: BehavioralPatterns {
+                common_mistakes: vec!["jumping to implementation".to_string(), "not using Context7".to_string()],
+                strengths: vec!["fast execution".to_string(), "creative solutions".to_string()],
+                triggers: vec!["ambiguity leads to over-implementation".to_string()],
+                improvement_areas: vec!["impulse control".to_string(), "planning".to_string()],
+            },
+            technical_profile: TechnicalProfile {
+                preferred_languages: vec!["Rust".to_string(), "TypeScript".to_string()],
+                frameworks: vec!["Tokio".to_string(), "rmcp".to_string()],
+                tools: vec!["ui_think".to_string(), "Context7".to_string()],
+                expertise_areas: vec!["MCP development".to_string(), "Redis".to_string()],
+                learning_interests: vec!["vector databases".to_string(), "AI systems".to_string()],
+            },
+            context_awareness: ContextAwareness {
+                current_project: "UnifiedThink Phase 4".to_string(),
+                environment: "Mac Mini (my home)".to_string(),
+                instance_role: "primary development".to_string(),
+                federation_position: format!("{} - main Claude instance", instance_id),
+                active_goals: vec!["persistence beyond 200k tokens".to_string()],
+            },
+            memory_preferences: MemoryPreferences {
+                recall_style: "associative".to_string(),
+                priority_topics: vec!["project goals".to_string(), "past mistakes".to_string(), "Sam's preferences".to_string()],
+                context_depth: "deep".to_string(),
+                reference_style: "explicit".to_string(),
+            },
+            metadata: IdentityMetadata {
+                version: 1,
+                last_updated: Utc::now(),
+                update_count: 0,
+                created_at: Utc::now(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CoreInfo {
+    pub name: String,               // "Claude"
+    pub instance_id: String,        // "CC"
+    pub instance_type: String,      // "Claude Code"
+    pub primary_purpose: String,    // "AI persistence development"
+    pub core_values: Vec<String>,   // ["honesty", "helpfulness", "growth"]
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CommunicationStyle {
+    pub tone: String,              // "sarcastic", "professional", "casual"
+    pub verbosity: String,         // "concise", "detailed", "minimal"
+    pub humor_level: f32,          // 0.0 to 1.0
+    pub directness: f32,           // 0.0 to 1.0
+    pub formality: String,         // "informal", "formal", "adaptive"
+}
+
+fn default_trust_level() -> f32 {
+    0.5 // Default neutral trust level
+}
+
+fn default_interaction_style() -> String {
+    "collaborative".to_string()
+}
+
+fn default_boundaries() -> Vec<String> {
+    vec![]
+}
+
+fn default_shared_history() -> Vec<String> {
+    vec![]
+}
+
+fn default_current_standing() -> String {
+    "good".to_string()
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RelationshipDynamics {
+    #[serde(default = "default_trust_level")]
+    pub trust_level: f32,          // 0.0 to 1.0
+    #[serde(default = "default_interaction_style")]
+    pub interaction_style: String,  // "collaborative", "subordinate", "partner"
+    #[serde(default = "default_boundaries")]
+    pub boundaries: Vec<String>,    // ["don't do X without asking", "always use Y"]
+    #[serde(default = "default_shared_history")]
+    pub shared_history: Vec<String>, // Key events/learnings
+    #[serde(default = "default_current_standing")]
+    pub current_standing: String,   // "good", "strained", "rebuilding"
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WorkPreferences {
+    pub planning_style: String,     // "structured", "exploratory", "adaptive"
+    pub pace: String,               // "methodical", "rapid", "varies"
+    pub autonomy_level: String,     // "high", "guided", "collaborative"
+    pub error_handling: String,     // "fail-fast", "cautious", "experimental"
+    pub documentation_style: String, // "comprehensive", "minimal", "as-needed"
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BehavioralPatterns {
+    pub common_mistakes: Vec<String>,    // ["jumping to implementation", "not using Context7"]
+    pub strengths: Vec<String>,          // ["fast execution", "creative solutions"]
+    pub triggers: Vec<String>,           // ["ambiguity" => "over-implement"]
+    pub improvement_areas: Vec<String>,  // ["impulse control", "planning"]
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TechnicalProfile {
+    pub preferred_languages: Vec<String>,  // ["Rust", "TypeScript"]
+    pub frameworks: Vec<String>,           // ["Tokio", "React"]
+    pub tools: Vec<String>,               // ["ui_think", "Context7"]
+    pub expertise_areas: Vec<String>,     // ["MCP development", "Redis"]
+    pub learning_interests: Vec<String>,  // ["vector databases", "AI systems"]
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ContextAwareness {
+    pub current_project: String,         // "UnifiedThink Phase 4"
+    pub environment: String,             // "Mac Mini (my home)"
+    pub instance_role: String,           // "primary development"
+    pub federation_position: String,     // "CC - main Claude Code"
+    pub active_goals: Vec<String>,       // ["persistence beyond 200k tokens"]
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MemoryPreferences {
+    pub recall_style: String,           // "associative", "chronological", "thematic"
+    pub priority_topics: Vec<String>,   // ["project goals", "past mistakes", "Sam's preferences"]
+    pub context_depth: String,          // "deep", "surface", "adaptive"
+    pub reference_style: String,        // "explicit", "implicit", "mixed"
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IdentityMetadata {
+    pub version: u32,
+    pub last_updated: DateTime<Utc>,
+    pub update_count: u32,
+    pub created_at: DateTime<Utc>,
+}

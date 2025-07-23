@@ -1,0 +1,374 @@
+use std::env;
+use std::fs;
+use std::path::Path;
+use std::time::Duration;
+use serde::{Deserialize, Serialize};
+use tracing;
+
+/// Main configuration structure for UnifiedIntelligence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    pub server: ServerConfig,
+    pub redis: RedisConfig,
+    pub rate_limiter: RateLimiterConfig,
+    pub search: SearchConfig,
+    pub boost_scores: BoostScoreConfig,
+    pub event_stream: EventStreamConfig,
+    pub bloom_filter: BloomFilterConfig,
+    pub time_series: TimeSeriesConfig,
+    pub retry: RetryConfig,
+    pub search_enhancements: SearchEnhancementsConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerConfig {
+    pub name: String,
+    pub version: String,
+    pub default_instance_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedisConfig {
+    pub host: String,
+    pub port: u16,
+    pub database: u8,
+    pub pool: PoolConfig,
+    pub default_ttl_seconds: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolConfig {
+    pub max_size: usize,
+    pub timeout_seconds: u64,
+    pub create_timeout_seconds: u64,
+    pub recycle_timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimiterConfig {
+    pub max_requests: u32,
+    pub window_seconds: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchConfig {
+    pub cache_ttl_seconds: u64,
+    pub index_name: String,
+    pub prefixes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoostScoreConfig {
+    pub boost_weight: f32,
+    pub search_weight: f32,
+    pub increments: BoostIncrements,
+    pub fuzzy_match_weight: f64,
+    pub title_match_weight: f64,
+    pub ngram_score_scale: f64,
+    pub bm25_score_scale: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoostIncrements {
+    pub view_base: f64,
+    pub view_per_30_seconds: f64,
+    pub use_action: f64,
+    pub helpful: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventStreamConfig {
+    pub max_length: u64,
+    pub approximate_trimming: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BloomFilterConfig {
+    pub error_rate: f64,
+    pub expected_items: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeSeriesConfig {
+    pub retention_ms: u64,
+    pub duplicate_policy: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryConfig {
+    pub max_attempts: u32,
+    pub initial_delay_ms: u64,
+    pub max_delay_ms: u64,
+    pub backoff_base: f64,
+    pub jitter_factor: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchEnhancementsConfig {
+    pub fuzzy_threshold: i64,
+    pub ngram_size: usize,
+    pub ngram_threshold: f64,
+    pub bm25: Bm25Config,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Bm25Config {
+    pub k1: f64,
+    pub b: f64,
+}
+
+impl Config {
+    /// Load configuration from file with environment variable overrides
+    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+        // Default config path
+        let config_path = env::var("UI_CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
+        
+        // Load config from file if it exists
+        let mut config = if Path::new(&config_path).exists() {
+            let contents = fs::read_to_string(&config_path)?;
+            let config: Config = serde_yaml::from_str(&contents)?;
+            tracing::info!("Loaded configuration from {}", config_path);
+            config
+        } else {
+            tracing::warn!("Config file not found at {}, using defaults", config_path);
+            Self::default()
+        };
+        
+        // Apply environment variable overrides
+        config.apply_env_overrides();
+        
+        // Validate configuration
+        config.validate()?;
+        
+        Ok(config)
+    }
+    
+    /// Apply environment variable overrides
+    fn apply_env_overrides(&mut self) {
+        // Server overrides
+        if let Ok(name) = env::var("UI_SERVER_NAME") {
+            self.server.name = name;
+        }
+        if let Ok(version) = env::var("UI_SERVER_VERSION") {
+            self.server.version = version;
+        }
+        if let Ok(instance_id) = env::var("INSTANCE_ID") {
+            self.server.default_instance_id = instance_id;
+        }
+        
+        // Redis overrides
+        if let Ok(host) = env::var("REDIS_HOST") {
+            self.redis.host = host;
+        }
+        if let Ok(port) = env::var("REDIS_PORT") {
+            if let Ok(port_num) = port.parse() {
+                self.redis.port = port_num;
+            }
+        }
+        if let Ok(db) = env::var("REDIS_DB") {
+            if let Ok(db_num) = db.parse() {
+                self.redis.database = db_num;
+            }
+        }
+        
+        // Pool overrides
+        if let Ok(pool_size) = env::var("UI_REDIS_POOL_SIZE") {
+            if let Ok(size) = pool_size.parse() {
+                self.redis.pool.max_size = size;
+            }
+        }
+        
+        // Rate limiter overrides
+        if let Ok(max_requests) = env::var("UI_RATE_LIMIT_MAX_REQUESTS") {
+            if let Ok(max) = max_requests.parse() {
+                self.rate_limiter.max_requests = max;
+            }
+        }
+        if let Ok(window) = env::var("UI_RATE_LIMIT_WINDOW_SECONDS") {
+            if let Ok(window_secs) = window.parse() {
+                self.rate_limiter.window_seconds = window_secs;
+            }
+        }
+        
+        // Search cache TTL override
+        if let Ok(cache_ttl) = env::var("UI_SEARCH_CACHE_TTL") {
+            if let Ok(ttl) = cache_ttl.parse() {
+                self.search.cache_ttl_seconds = ttl;
+            }
+        }
+        
+        // Boost score overrides
+        if let Ok(boost_weight) = env::var("UI_BOOST_WEIGHT") {
+            if let Ok(weight) = boost_weight.parse() {
+                self.boost_scores.boost_weight = weight;
+                self.boost_scores.search_weight = 1.0 - weight;
+            }
+        }
+        
+        // Event stream overrides
+        if let Ok(max_length) = env::var("UI_EVENT_STREAM_MAX_LENGTH") {
+            if let Ok(max) = max_length.parse() {
+                self.event_stream.max_length = max;
+            }
+        }
+        
+        // Retry overrides
+        if let Ok(jitter) = env::var("UI_RETRY_JITTER_FACTOR") {
+            if let Ok(jitter_val) = jitter.parse() {
+                self.retry.jitter_factor = jitter_val;
+            }
+        }
+    }
+    
+    /// Validate configuration
+    fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Validate Redis configuration
+        if self.redis.port == 0 {
+            return Err("Redis port cannot be 0".into());
+        }
+        
+        // Validate rate limiter
+        if self.rate_limiter.max_requests == 0 {
+            return Err("Rate limiter max_requests cannot be 0".into());
+        }
+        if self.rate_limiter.window_seconds == 0 {
+            return Err("Rate limiter window_seconds cannot be 0".into());
+        }
+        
+        // Validate boost scores
+        if self.boost_scores.boost_weight < 0.0 || self.boost_scores.boost_weight > 1.0 {
+            return Err("Boost weight must be between 0.0 and 1.0".into());
+        }
+        
+        // Validate bloom filter
+        if self.bloom_filter.error_rate <= 0.0 || self.bloom_filter.error_rate >= 1.0 {
+            return Err("Bloom filter error rate must be between 0.0 and 1.0".into());
+        }
+        
+        // Validate retry
+        if self.retry.jitter_factor < 0.0 || self.retry.jitter_factor > 1.0 {
+            return Err("Retry jitter factor must be between 0.0 and 1.0".into());
+        }
+        
+        Ok(())
+    }
+    
+    /// Get Redis URL with password from environment
+    pub fn get_redis_url(&self) -> String {
+        let password = env::var("REDIS_PASSWORD")
+            .or_else(|_| env::var("REDIS_PASS"))
+            .unwrap_or_else(|_| {
+                if env::var("ALLOW_DEFAULT_REDIS_PASSWORD").is_ok() {
+                    tracing::warn!("REDIS_PASSWORD not set, using default for local development");
+                    "legacymind_redis_pass".to_string()
+                } else {
+                    panic!("Redis password not configured. Please set REDIS_PASSWORD environment variable.");
+                }
+            });
+        
+        if password.is_empty() {
+            format!("redis://{}:{}/{}", self.redis.host, self.redis.port, self.redis.database)
+        } else {
+            format!("redis://:{}@{}:{}/{}", password, self.redis.host, self.redis.port, self.redis.database)
+        }
+    }
+    
+    /// Get pool timeout as Duration
+    pub fn get_pool_timeout(&self) -> Duration {
+        Duration::from_secs(self.redis.pool.timeout_seconds)
+    }
+    
+    /// Get pool create timeout as Duration
+    pub fn get_pool_create_timeout(&self) -> Duration {
+        Duration::from_secs(self.redis.pool.create_timeout_seconds)
+    }
+    
+    /// Get pool recycle timeout as Duration
+    pub fn get_pool_recycle_timeout(&self) -> Duration {
+        Duration::from_secs(self.redis.pool.recycle_timeout_seconds)
+    }
+    
+    /// Get search cache TTL as Duration
+    pub fn get_search_cache_ttl(&self) -> Duration {
+        Duration::from_secs(self.search.cache_ttl_seconds)
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            server: ServerConfig {
+                name: "unified-intelligence".to_string(),
+                version: "3.0.0".to_string(),
+                default_instance_id: "test".to_string(),
+            },
+            redis: RedisConfig {
+                host: "localhost".to_string(),
+                port: 6379,
+                database: 0,
+                pool: PoolConfig {
+                    max_size: 16,
+                    timeout_seconds: 5,
+                    create_timeout_seconds: 5,
+                    recycle_timeout_seconds: 5,
+                },
+                default_ttl_seconds: 604800,
+            },
+            rate_limiter: RateLimiterConfig {
+                max_requests: 100,
+                window_seconds: 60,
+            },
+            search: SearchConfig {
+                cache_ttl_seconds: 300,
+                index_name: "idx:thoughts".to_string(),
+                prefixes: vec![
+                    "Claude:Thoughts:".to_string(),
+                    "CC:Thoughts:".to_string(),
+                    "CCI:Thoughts:".to_string(),
+                ],
+            },
+            boost_scores: BoostScoreConfig {
+                boost_weight: 0.1,
+                search_weight: 0.9,
+                increments: BoostIncrements {
+                    view_base: 1.0,
+                    view_per_30_seconds: 1.0,
+                    use_action: 5.0,
+                    helpful: 10.0,
+                },
+                fuzzy_match_weight: 0.8,
+                title_match_weight: 0.9,
+                ngram_score_scale: 50.0,
+                bm25_score_scale: 30.0,
+            },
+            event_stream: EventStreamConfig {
+                max_length: 10000,
+                approximate_trimming: true,
+            },
+            bloom_filter: BloomFilterConfig {
+                error_rate: 0.01,
+                expected_items: 100000,
+            },
+            time_series: TimeSeriesConfig {
+                retention_ms: 86400000,
+                duplicate_policy: "SUM".to_string(),
+            },
+            retry: RetryConfig {
+                max_attempts: 3,
+                initial_delay_ms: 100,
+                max_delay_ms: 5000,
+                backoff_base: 2.0,
+                jitter_factor: 0.1,
+            },
+            search_enhancements: SearchEnhancementsConfig {
+                fuzzy_threshold: 60,
+                ngram_size: 3,
+                ngram_threshold: 0.4,
+                bm25: Bm25Config {
+                    k1: 1.2,
+                    b: 0.75,
+                },
+            },
+        }
+    }
+}

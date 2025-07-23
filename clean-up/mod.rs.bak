@@ -1,0 +1,15 @@
+/// Handler modules for UnifiedIntelligence MCP tools
+/// 
+/// This module provides modular handlers for each tool:
+/// - identity: Handles ui_identity operations
+/// - thoughts: Handles ui_think operations  
+/// - search: Handles ui_search operations
+
+pub mod identity;
+pub mod search;
+pub mod thoughts;
+
+// Re-export handler traits from submodules
+pub use identity::IdentityHandler;
+pub use search::SearchHandler;
+pub use thoughts::ThoughtsHandler;
