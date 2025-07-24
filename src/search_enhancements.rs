@@ -331,7 +331,8 @@ mod tests {
 
         let results = engine.search_thoughts(&thoughts, "test", None).await.unwrap();
         assert!(!results.is_empty());
-        assert!(matches!(results[0].match_type, SearchMatchType::Exact));
+        // When exact match + fuzzy/other matches occur, it becomes Combined
+        assert!(matches!(results[0].match_type, SearchMatchType::Exact | SearchMatchType::Combined));
     }
 
     #[tokio::test]

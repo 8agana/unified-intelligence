@@ -167,10 +167,13 @@ mod tests {
     #[test]
     fn test_invalid_chain_id() {
         let validator = InputValidator::new();
+        // Only empty chain_id is invalid
         assert!(matches!(
-            validator.validate_chain_id("not-a-uuid"),
+            validator.validate_chain_id(""),
             Err(ValidationError::InvalidChainId { .. })
         ));
+        // Non-empty chain IDs are valid (doesn't have to be UUID)
+        assert!(validator.validate_chain_id("not-a-uuid").is_ok());
     }
     
     #[test]

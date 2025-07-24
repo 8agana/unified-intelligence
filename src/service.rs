@@ -9,12 +9,11 @@ use rmcp_macros::{tool, tool_handler, tool_router};
 use tracing;
 
 use crate::error::UnifiedIntelligenceError;
-use crate::models::{UiThinkParams, UiIdentityParams, UiSearchParams, UiSamParams};
+use crate::models::UiThinkParams;
 use crate::config::Config;
 use crate::redis::RedisManager;
 use crate::repository::RedisThoughtRepository;
-use crate::handlers::{ToolHandlers, identity::IdentityHandler, sam::SamHandler, search::SearchHandler, thoughts::ThoughtsHandler};
-use crate::search_optimization::SearchCache;
+use crate::handlers::{ToolHandlers, thoughts::ThoughtsHandler};
 use crate::validation::InputValidator;
 use crate::rate_limit::RateLimiter;
 
@@ -44,37 +43,17 @@ impl UnifiedIntelligenceService {
         // Initialize Redis with config
         let redis_manager = Arc::new(RedisManager::new_with_config(&config).await?);
         
-        // Store OPENAI_API_KEY in Redis if available
-        if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
-            if !api_key.is_empty() {
-                redis_manager.store_api_key("openai_api_key", &api_key).await?;
-                tracing::info!("Stored OPENAI_API_KEY in Redis");
-            }
-        } else {
-            tracing::warn!("OPENAI_API_KEY not found in environment");
-        }
-        
         // Initialize Bloom filter for this instance - DISABLED (requires RedisBloom)
         // redis_manager.init_bloom_filter(&instance_id).await?;
         
         // Initialize event stream for this instance
         redis_manager.init_event_stream(&instance_id).await?;
         
-        // Check for search capability
-        let search_available = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let search_enabled = redis_manager.create_search_index().await?;
-        search_available.store(search_enabled, std::sync::atomic::Ordering::SeqCst);
-        
-        // Create search cache with configured TTL
-        let search_cache = Arc::new(std::sync::Mutex::new(SearchCache::new(config.search.cache_ttl_seconds)));
-        
-        // Create repository with cache and config
+        // Create repository with config and instance_id
         let repository = Arc::new(RedisThoughtRepository::new(
             redis_manager.clone(),
-            search_available.clone(),
-            search_cache.clone(),
-            instance_id.clone(),
             config.clone(),
+            instance_id.clone(),
         ));
         
         // Create validator
@@ -91,8 +70,6 @@ impl UnifiedIntelligenceService {
             repository,
             instance_id.clone(),
             validator,
-            search_cache,
-            search_available,
         ));
         
         Ok(Self {
@@ -141,88 +118,6 @@ impl UnifiedIntelligenceService {
             }
         }
     }
-    
-    #[tool(description = "Search for thoughts and chains with enhanced filtering capabilities")]
-    pub async fn ui_search(
-        &self,
-        params: Parameters<UiSearchParams>,
-    ) -> std::result::Result<CallToolResult, ErrorData> {
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
-            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
-            return Err(ErrorData::invalid_params(
-                format!("Rate limit exceeded. Please slow down your requests."), 
-                None
-            ));
-        }
-        
-        match self.handlers.ui_search(params.0).await {
-            Ok(response) => {
-                let content = Content::json(response)
-                    .map_err(|e| ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None))?;
-                Ok(CallToolResult::success(vec![content]))
-            },
-            Err(e) => {
-                tracing::error!("ui_search error: {}", e);
-                Err(ErrorData::internal_error(e.to_string(), None))
-            }
-        }
-    }
-    
-    #[tool(description = "View and manage persistent identity through structured categories")]
-    pub async fn ui_identity(
-        &self,
-        params: Parameters<UiIdentityParams>,
-    ) -> std::result::Result<CallToolResult, ErrorData> {
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
-            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
-            return Err(ErrorData::invalid_params(
-                format!("Rate limit exceeded. Please slow down your requests."), 
-                None
-            ));
-        }
-        
-        match self.handlers.ui_identity(params.0).await {
-            Ok(response) => {
-                let content = Content::json(response)
-                    .map_err(|e| ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None))?;
-                Ok(CallToolResult::success(vec![content]))
-            },
-            Err(e) => {
-                tracing::error!("ui_identity error: {}", e);
-                Err(ErrorData::internal_error(e.to_string(), None))
-            }
-        }
-    }
-    
-    #[tool(description = "Manage Sam's context and identity data in Redis")]
-    pub async fn ui_sam(
-        &self,
-        params: Parameters<UiSamParams>,
-    ) -> std::result::Result<CallToolResult, ErrorData> {
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
-            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
-            return Err(ErrorData::invalid_params(
-                format!("Rate limit exceeded. Please slow down your requests."), 
-                None
-            ));
-        }
-        
-        match self.handlers.ui_sam(params.0).await {
-            Ok(response) => {
-                let content = Content::json(response)
-                    .map_err(|e| ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None))?;
-                Ok(CallToolResult::success(vec![content]))
-            },
-            Err(e) => {
-                tracing::error!("ui_sam error: {}", e);
-                Err(ErrorData::internal_error(e.to_string(), None))
-            }
-        }
-    }
-    
 }
 
 #[tool_handler]

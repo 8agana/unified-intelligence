@@ -10,17 +10,13 @@ mod repository;
 mod repository_traits;
 mod handlers;
 mod service;
-mod search_optimization;
 mod validation;
 mod rate_limit;
 mod lua_scripts;
 mod visual;
 mod frameworks;
-mod identity_documents;
 mod circuit_breaker;
 mod retry;
-mod redis_abstraction;
-mod search_enhancements;
 
 use crate::service::UnifiedIntelligenceService;
 

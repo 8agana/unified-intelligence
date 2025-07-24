@@ -1,5 +1,5 @@
-use unified_think::redis::RedisManager;
-use unified_think::error::Result;
+use unified_intelligence::redis::RedisManager;
+use unified_intelligence::error::Result;
 use std::time::Duration;
 use tokio::time::sleep;
 

@@ -11,13 +11,10 @@ pub struct Config {
     pub server: ServerConfig,
     pub redis: RedisConfig,
     pub rate_limiter: RateLimiterConfig,
-    pub search: SearchConfig,
-    pub boost_scores: BoostScoreConfig,
     pub event_stream: EventStreamConfig,
     pub bloom_filter: BloomFilterConfig,
     pub time_series: TimeSeriesConfig,
     pub retry: RetryConfig,
-    pub search_enhancements: SearchEnhancementsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,32 +48,6 @@ pub struct RateLimiterConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchConfig {
-    pub cache_ttl_seconds: u64,
-    pub index_name: String,
-    pub prefixes: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoostScoreConfig {
-    pub boost_weight: f32,
-    pub search_weight: f32,
-    pub increments: BoostIncrements,
-    pub fuzzy_match_weight: f64,
-    pub title_match_weight: f64,
-    pub ngram_score_scale: f64,
-    pub bm25_score_scale: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoostIncrements {
-    pub view_base: f64,
-    pub view_per_30_seconds: f64,
-    pub use_action: f64,
-    pub helpful: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventStreamConfig {
     pub max_length: u64,
     pub approximate_trimming: bool,
@@ -101,20 +72,6 @@ pub struct RetryConfig {
     pub max_delay_ms: u64,
     pub backoff_base: f64,
     pub jitter_factor: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchEnhancementsConfig {
-    pub fuzzy_threshold: i64,
-    pub ngram_size: usize,
-    pub ngram_threshold: f64,
-    pub bm25: Bm25Config,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Bm25Config {
-    pub k1: f64,
-    pub b: f64,
 }
 
 impl Config {
@@ -190,21 +147,6 @@ impl Config {
             }
         }
         
-        // Search cache TTL override
-        if let Ok(cache_ttl) = env::var("UI_SEARCH_CACHE_TTL") {
-            if let Ok(ttl) = cache_ttl.parse() {
-                self.search.cache_ttl_seconds = ttl;
-            }
-        }
-        
-        // Boost score overrides
-        if let Ok(boost_weight) = env::var("UI_BOOST_WEIGHT") {
-            if let Ok(weight) = boost_weight.parse() {
-                self.boost_scores.boost_weight = weight;
-                self.boost_scores.search_weight = 1.0 - weight;
-            }
-        }
-        
         // Event stream overrides
         if let Ok(max_length) = env::var("UI_EVENT_STREAM_MAX_LENGTH") {
             if let Ok(max) = max_length.parse() {
@@ -233,11 +175,6 @@ impl Config {
         }
         if self.rate_limiter.window_seconds == 0 {
             return Err("Rate limiter window_seconds cannot be 0".into());
-        }
-        
-        // Validate boost scores
-        if self.boost_scores.boost_weight < 0.0 || self.boost_scores.boost_weight > 1.0 {
-            return Err("Boost weight must be between 0.0 and 1.0".into());
         }
         
         // Validate bloom filter
@@ -287,11 +224,6 @@ impl Config {
     pub fn get_pool_recycle_timeout(&self) -> Duration {
         Duration::from_secs(self.redis.pool.recycle_timeout_seconds)
     }
-    
-    /// Get search cache TTL as Duration
-    pub fn get_search_cache_ttl(&self) -> Duration {
-        Duration::from_secs(self.search.cache_ttl_seconds)
-    }
 }
 
 impl Default for Config {
@@ -318,29 +250,6 @@ impl Default for Config {
                 max_requests: 100,
                 window_seconds: 60,
             },
-            search: SearchConfig {
-                cache_ttl_seconds: 300,
-                index_name: "idx:thoughts".to_string(),
-                prefixes: vec![
-                    "Claude:Thoughts:".to_string(),
-                    "CC:Thoughts:".to_string(),
-                    "CCI:Thoughts:".to_string(),
-                ],
-            },
-            boost_scores: BoostScoreConfig {
-                boost_weight: 0.1,
-                search_weight: 0.9,
-                increments: BoostIncrements {
-                    view_base: 1.0,
-                    view_per_30_seconds: 1.0,
-                    use_action: 5.0,
-                    helpful: 10.0,
-                },
-                fuzzy_match_weight: 0.8,
-                title_match_weight: 0.9,
-                ngram_score_scale: 50.0,
-                bm25_score_scale: 30.0,
-            },
             event_stream: EventStreamConfig {
                 max_length: 10000,
                 approximate_trimming: true,
@@ -359,15 +268,6 @@ impl Default for Config {
                 max_delay_ms: 5000,
                 backoff_base: 2.0,
                 jitter_factor: 0.1,
-            },
-            search_enhancements: SearchEnhancementsConfig {
-                fuzzy_threshold: 60,
-                ngram_size: 3,
-                ngram_threshold: 0.4,
-                bm25: Bm25Config {
-                    k1: 1.2,
-                    b: 0.75,
-                },
             },
         }
     }

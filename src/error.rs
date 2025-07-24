@@ -25,9 +25,6 @@ pub enum UnifiedIntelligenceError {
     #[error("Validation error: {field} - {reason}")]
     Validation { field: String, reason: String },
     
-    #[error("Not found: {0}")]
-    NotFound(String),
-    
     #[error("Invalid action: {0}")]
     #[allow(dead_code)]
     InvalidAction(String),
@@ -35,9 +32,6 @@ pub enum UnifiedIntelligenceError {
     #[error("Chain operation failed: {0}")]
     #[allow(dead_code)]
     ChainOperation(String),
-    
-    #[error("Search unavailable: {0}")]
-    SearchUnavailable(String),
     
     #[error("Rate limit exceeded")]
     RateLimit,
@@ -54,24 +48,6 @@ pub enum UnifiedIntelligenceError {
     
     #[error("Configuration error: {0}")]
     Configuration(String),
-    
-    #[error("Python script error: {0}")]
-    Python(String),
-    
-    #[error("Circuit breaker open: {0}")]
-    CircuitBreakerOpen(String),
-    
-    #[error("Max retries exceeded: {attempts} attempts failed")]
-    MaxRetriesExceeded { attempts: u32 },
-    
-    #[error("Connection health check failed: {0}")]
-    HealthCheckFailed(String),
-    
-    #[error("Redis connection unavailable: {0}")]
-    ConnectionUnavailable(String),
-    
-    #[error("Operation cancelled: {0}")]
-    Cancelled(String),
     
     #[error("Duplicate thought detected for instance {instance}: {preview}")]
     DuplicateThought { instance: String, preview: String },

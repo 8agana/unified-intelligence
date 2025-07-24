@@ -32,39 +32,6 @@ rate_limiter:
   # Time window in seconds
   window_seconds: 60
 
-# Search configuration
-search:
-  # Cache TTL in seconds
-  cache_ttl_seconds: 300
-  
-  # Search index name
-  index_name: "idx:thoughts"
-  
-  # Search prefixes for different instances
-  prefixes:
-    - "Claude:Thoughts:"
-    - "CC:Thoughts:"
-    - "CCI:Thoughts:"
-
-# Boost score configuration
-boost_scores:
-  # Weight applied to boost scores vs search scores
-  boost_weight: 0.1  # 10% weight
-  search_weight: 0.9  # 90% weight
-  
-  # Action-based boost increments
-  increments:
-    view_base: 1.0
-    view_per_30_seconds: 1.0
-    use: 5.0
-    helpful: 10.0
-    
-  # Score scaling factors
-  fuzzy_match_weight: 0.8
-  title_match_weight: 0.9
-  ngram_score_scale: 50.0
-  bm25_score_scale: 30.0
-
 # Event stream configuration
 event_stream:
   # Maximum events to keep per stream
@@ -98,69 +65,3 @@ retry:
   backoff_base: 2.0
   # Jitter factor (0.0 to 1.0)
   jitter_factor: 0.1
-
-# Search enhancement configuration
-search_enhancements:
-  # Fuzzy matching threshold
-  fuzzy_threshold: 60
-  # N-gram size
-  ngram_size: 3
-  # N-gram threshold
-  ngram_threshold: 0.4
-  # BM25 parameters
-  bm25:
-    k1: 1.2
-    b: 0.75
-
-# Embedding service configuration (existing)
-embedding_service:
-  redis:
-    url: "redis://:${REDIS_PASSWORD}@localhost:6379/0"
-    stream_key: "${INSTANCE_ID}:events"
-  
-  # Provider configuration
-  providers:
-    primary:
-      provider: "openai"
-      api_key_source: "redis"  # or "env"
-      api_key_field: "config:openai_api_key"
-      model: "text-embedding-3-small"
-      dimensions: 1536
-      rate_limit_rps: 10
-    
-    fallback:
-      provider: "groq"
-      api_key_source: "redis"
-      api_key_field: "config:groq_api_key"
-      model: "llama3-8b-8192"  # Used for semantic feature extraction
-      enabled: true
-      retry_after_minutes: 5
-  
-  # Fallback strategy
-  fallback_strategy:
-    enable_fallback: true
-    primary_failure_threshold: 3  # Switch to fallback after N failures
-    track_provider_metrics: true
-    fallback_on_rate_limit: true
-    fallback_on_timeout: true
-    fallback_on_api_error: true
-  
-  # Processing configuration
-  processing:
-    max_retries: 3
-    retry_backoff_base: 60   # seconds
-    max_retry_delay: 300     # seconds
-    batch_size: 10
-    rate_limit_delay: 0.1    # 100ms between API calls
-  
-  # Monitoring
-  monitoring:
-    metrics_interval: 60     # seconds
-    log_level: "INFO"
-    track_provider_usage: true
-    alert_on_fallback: true
-  
-  # Consumer configuration
-  consumer:
-    group_name: "embedding_processors"
-    consumer_prefix: "embedder"
