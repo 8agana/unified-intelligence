@@ -19,6 +19,11 @@ pub trait ThoughtRepository: Send + Sync {
     /// Check if chain exists
     async fn chain_exists(&self, chain_id: &str) -> Result<bool>;
     
+    /// Get a single thought by ID
+    async fn get_thought(&self, instance: &str, thought_id: &str) -> Result<Option<ThoughtRecord>>;
+
+    /// Get all thoughts in a chain
+    async fn get_chain_thoughts(&self, instance: &str, chain_id: &str) -> Result<Vec<ThoughtRecord>>;
     
     // ===== FEEDBACK LOOP METHODS (Phase 1) =====
     
@@ -152,7 +157,7 @@ impl ThoughtRepository for RedisThoughtRepository {
         let is_new_chain = !self.redis.exists(&key).await?;
         
         // Save the metadata
-        self.redis.json_set_with_timeout(&key, "$", metadata).await?;
+        self.redis.json_set(&key, "$", metadata).await?;
         
         // Log appropriate event
         let event_type = if is_new_chain { "chain_created" } else { "chain_updated" };
@@ -173,6 +178,23 @@ impl ThoughtRepository for RedisThoughtRepository {
     async fn chain_exists(&self, chain_id: &str) -> Result<bool> {
         let key = self.chain_metadata_key(chain_id);
         self.redis.exists(&key).await
+    }
+    
+    async fn get_thought(&self, instance: &str, thought_id: &str) -> Result<Option<ThoughtRecord>> {
+        let thought_key = self.thought_key(instance, thought_id);
+        self.redis.json_get::<ThoughtRecord>(&thought_key, "$").await
+    }
+
+    async fn get_chain_thoughts(&self, instance: &str, chain_id: &str) -> Result<Vec<ThoughtRecord>> {
+        let chain_key = format!("{}:chains:{}", instance, chain_id);
+        let thought_jsons = self.redis.get_chain_thoughts_atomic(&chain_key, instance).await?;
+        let mut thoughts = Vec::new();
+        for json_str in thought_jsons {
+            let thought: ThoughtRecord = serde_json::from_str(&json_str)
+                .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?;
+            thoughts.push(thought);
+        }
+        Ok(thoughts)
     }
     
     // ===== FEEDBACK LOOP IMPLEMENTATIONS (Phase 1) =====

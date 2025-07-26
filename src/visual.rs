@@ -12,7 +12,7 @@ impl VisualOutput {
 
     /// Display thought storage beginning
     pub fn thought_start(&self, thought_number: i32, total_thoughts: i32) {
-        println!("{} {}{}{}", 
+        eprintln!("{} {}{}{}", 
             "🧠".blue(),
             "Thought ".bright_blue(),
             format!("{}/{}", thought_number, total_thoughts).bright_white(),
@@ -26,7 +26,7 @@ impl VisualOutput {
         let max_width = 80;
         for line in content.lines() {
             if line.len() <= max_width {
-                println!("   {}", line.white());
+                eprintln!("   {}", line.white());
             } else {
                 // Simple word wrap
                 let words: Vec<&str> = line.split_whitespace().collect();
@@ -40,15 +40,15 @@ impl VisualOutput {
                         current_line.push_str(word);
                     } else {
                         if !current_line.is_empty() {
-                            println!("   {}", current_line.white());
+                            eprintln!("   {}", current_line.white());
                             current_line = word.to_string();
                         } else {
-                            println!("   {}", word.white());
+                            eprintln!("   {}", word.white());
                         }
                     }
                 }
                 if !current_line.is_empty() {
-                    println!("   {}", current_line.white());
+                    eprintln!("   {}", current_line.white());
                 }
             }
         }
@@ -57,12 +57,12 @@ impl VisualOutput {
     /// Display chain information
     pub fn chain_info(&self, chain_id: &str, is_new: bool) {
         if is_new {
-            println!("   {} {}", 
+            eprintln!("   {} {}", 
                 "⛓️".green(),
                 format!("New chain: {}", Self::truncate_uuid(chain_id)).bright_green()
             );
         } else {
-            println!("   {} {}", 
+            eprintln!("   {} {}", 
                 "⛓️".green(),
                 format!("Chain: {}", Self::truncate_uuid(chain_id)).green()
             );
@@ -71,7 +71,7 @@ impl VisualOutput {
 
     /// Display thought storage success
     pub fn thought_stored(&self, thought_id: &str) {
-        println!("   {} {}", 
+        eprintln!("   {} {}", 
             "✅".bright_green(),
             format!("Stored: {}", Self::truncate_uuid(thought_id)).green()
         );
@@ -79,7 +79,7 @@ impl VisualOutput {
 
     /// Display error messages
     pub fn error(&self, message: &str) {
-        println!("   {} {}", 
+        eprintln!("   {} {}", 
             "❌".red(),
             message.red()
         );
@@ -89,13 +89,13 @@ impl VisualOutput {
     #[allow(dead_code)]
     pub fn search_results(&self, count: usize, query: &str) {
         if count > 0 {
-            println!("{} {} {}", 
+            eprintln!("{} {} {}", 
                 "🔍".yellow(),
                 format!("Found {} thoughts", count).bright_yellow(),
                 format!("for: {}", query).yellow()
             );
         } else {
-            println!("{} {}", 
+            eprintln!("{} {}", 
                 "🔍".yellow(),
                 format!("No thoughts found for: {}", query).yellow()
             );
@@ -104,7 +104,7 @@ impl VisualOutput {
 
     /// Display thinking completion
     pub fn thinking_complete(&self) {
-        println!("   {} {}", 
+        eprintln!("   {} {}", 
             "🎯".bright_blue(),
             "Thinking complete".bright_blue()
         );
@@ -113,7 +113,7 @@ impl VisualOutput {
     /// Display next thought needed indicator
     pub fn next_thought_indicator(&self, next_needed: bool) {
         if next_needed {
-            println!("   {} {}", 
+            eprintln!("   {} {}", 
                 "➡️".bright_cyan(),
                 "Next thought needed...".bright_cyan()
             );
@@ -135,7 +135,7 @@ impl VisualOutput {
         let filled = "█".repeat(progress);
         let empty = "░".repeat(20 - progress);
         
-        println!("   {} [{}{}] {}/{}", 
+        eprintln!("   {} [{}{}] {}/{}", 
             "📊".bright_blue(),
             filled.bright_blue(),
             empty.dimmed(),

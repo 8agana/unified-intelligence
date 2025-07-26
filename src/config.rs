@@ -195,12 +195,8 @@ impl Config {
         let password = env::var("REDIS_PASSWORD")
             .or_else(|_| env::var("REDIS_PASS"))
             .unwrap_or_else(|_| {
-                if env::var("ALLOW_DEFAULT_REDIS_PASSWORD").is_ok() {
-                    tracing::warn!("REDIS_PASSWORD not set, using default for local development");
-                    "legacymind_redis_pass".to_string()
-                } else {
-                    panic!("Redis password not configured. Please set REDIS_PASSWORD environment variable.");
-                }
+                tracing::warn!("REDIS_PASSWORD not set, assuming no password for local development.");
+                "".to_string()
             });
         
         if password.is_empty() {

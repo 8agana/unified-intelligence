@@ -315,7 +315,7 @@ impl FrameworkVisual {
         };
 
         if framework != &ThinkingFramework::Sequential {
-            println!("   {} {}", 
+            eprintln!("   {} {}", 
                 icon.bright_purple(),
                 format!("[{}]", framework.name()).bright_purple()
             );
@@ -325,12 +325,12 @@ impl FrameworkVisual {
     /// Display framework prompts
     pub fn display_prompts(prompts: &[String]) {
         if !prompts.is_empty() {
-            println!("   {} {}", 
+            eprintln!("   {} {}", 
                 "💭".bright_cyan(),
                 "Framework prompts:".bright_cyan()
             );
             for (i, prompt) in prompts.iter().enumerate() {
-                println!("      {}. {}", 
+                eprintln!("      {}. {}", 
                     (i + 1).to_string().cyan(),
                     prompt.white()
                 );
@@ -342,7 +342,7 @@ impl FrameworkVisual {
     pub fn display_insights(insights: &[String]) {
         if !insights.is_empty() {
             for insight in insights {
-                println!("   {} {}", 
+                eprintln!("   {} {}", 
                     "💡".bright_yellow(),
                     insight.yellow()
                 );

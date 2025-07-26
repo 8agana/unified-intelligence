@@ -31,11 +31,13 @@ async fn main() -> Result<()> {
     
     let service = UnifiedIntelligenceService::new().await?;
     
-    // Start the MCP server on stdio transport
+    tracing::info!("main: Service created, starting server on stdio transport");
     let server = service.serve(stdio()).await?;
+    tracing::info!("main: Server started, waiting for connection to close");
     
     // This keeps the server running until the transport closes
     server.waiting().await?;
+    tracing::info!("main: Server connection closed");
     
     eprintln!("Server shutting down");
     Ok(())

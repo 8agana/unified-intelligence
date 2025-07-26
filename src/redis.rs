@@ -1,11 +1,9 @@
 use std::sync::Arc;
-use std::time::Duration;
-use std::future::Future;
-use deadpool_redis::{Config as DeadpoolConfig, Runtime, Pool};
-use deadpool::{managed::{PoolConfig, Timeouts, QueueMode}};
-use redis::{AsyncCommands, JsonAsyncCommands, Script};
-use tracing;
-use tokio::time::timeout;
+
+use deadpool_redis::{Config as DeadpoolConfig, Pool, PoolConfig, Runtime, Timeouts};
+use deadpool::managed::QueueMode;
+use redis::{AsyncCommands, Script, JsonAsyncCommands};
+
 use chrono;
 
 use crate::error::{Result, UnifiedIntelligenceError};
@@ -25,13 +23,13 @@ impl RedisManager {
     /// Create a new Redis manager with configuration
     pub async fn new_with_config(config: &crate::config::Config) -> Result<Self> {
         let redis_url = config.get_redis_url();
-        
-        tracing::info!("Connecting to Redis at {}:{} (db: {})", 
+
+        tracing::info!("Connecting to Redis at {}:{} (db: {})",
             config.redis.host, config.redis.port, config.redis.database);
-        
+
         // Configure the connection pool with settings from config
         let mut cfg = DeadpoolConfig::from_url(&redis_url);
-        
+
         // Set pool configuration from config
         cfg.pool = Some(PoolConfig {
             max_size: config.redis.pool.max_size,
@@ -42,15 +40,15 @@ impl RedisManager {
             },
             queue_mode: QueueMode::Fifo,
         });
-        
+
         let pool = cfg.create_pool(Some(Runtime::Tokio1))
             .map_err(|e| UnifiedIntelligenceError::PoolCreation(e.to_string()))?;
-        
+
         // Test the connection
         let mut conn = pool.get().await?;
         let _: String = redis::cmd("PING").query_async(&mut conn).await?;
         tracing::info!("Redis connection established");
-        
+
         // Create instance with empty scripts for now
         let instance = Self {
             pool: Arc::new(pool),
@@ -85,7 +83,47 @@ impl RedisManager {
         Ok(())
     }
     
-    
+    /// Get a JSON object from Redis
+    pub async fn json_get<T: serde::de::DeserializeOwned>(
+        &self,
+        key: &str,
+        path: &str,
+    ) -> Result<Option<T>> {
+        let mut conn = self.get_connection().await?;
+        
+        // Use raw command to handle RedisJSON response
+        let result: Option<String> = redis::cmd("JSON.GET")
+            .arg(key)
+            .arg(path)
+            .query_async(&mut *conn)
+            .await?;
+        
+        match result {
+            Some(json_str) => {
+                // When using "$" path, RedisJSON returns an array
+                if path == "$" {
+                    // Parse as array and get first element
+                    if let Ok(values) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
+                        if let Some(first_value) = values.first() {
+                            let value = serde_json::from_value(first_value.clone())?;
+                            Ok(Some(value))
+                        } else {
+                            Ok(None)
+                        }
+                    } else {
+                        // Try parsing directly if not an array
+                        let value = serde_json::from_str(&json_str)?;
+                        Ok(Some(value))
+                    }
+                } else {
+                    // For other paths, parse directly
+                    let value = serde_json::from_str(&json_str)?;
+                    Ok(Some(value))
+                }
+            }
+            None => Ok(None),
+        }
+    }
     
     /// Check if a key exists
     pub async fn exists(&self, key: &str) -> Result<bool> {
@@ -129,36 +167,9 @@ impl RedisManager {
     
     // Timeout wrapper methods
     
-    /// Execute an async operation with a timeout
-    pub async fn with_timeout<F, T>(
-        duration: Duration,
-        operation: F,
-    ) -> Result<T>
-    where
-        F: Future<Output = Result<T>>,
-    {
-        match timeout(duration, operation).await {
-            Ok(result) => result,
-            Err(_) => Err(UnifiedIntelligenceError::Timeout(duration.as_secs())),
-        }
-    }
     
     
-    /// Set JSON value with timeout (default 5 seconds)
-    pub async fn json_set_with_timeout<T>(
-        &self,
-        key: &str,
-        path: &str,
-        value: &T,
-    ) -> Result<()>
-    where
-        T: serde::Serialize + Send + Sync,
-    {
-        Self::with_timeout(
-            Duration::from_secs(5),
-            self.json_set(key, path, value)
-        ).await
-    }
+    
     
     // Lua Script Methods
     
@@ -279,6 +290,40 @@ impl RedisManager {
     }
     
     
+    
+    /// Get all thoughts in a chain using Lua script
+    pub async fn get_chain_thoughts_atomic(
+        &self,
+        chain_key: &str,
+        instance: &str,
+    ) -> Result<Vec<String>> {
+        let mut conn = self.get_connection().await?;
+        
+        let keys = vec![chain_key];
+        
+        // Get script SHA
+        let script_sha = {
+            let scripts = self.scripts.read().await;
+            scripts.get_chain_thoughts.clone()
+        };
+        
+        let result: Vec<String> = redis::cmd("EVALSHA")
+            .arg(&script_sha)
+            .arg(keys.len())
+            .arg(&keys)
+            .arg(instance) // ARGV[1]
+            .query_async(&mut *conn)
+            .await
+            .or_else(|e| {
+                if e.to_string().contains("NOSCRIPT") {
+                    tracing::warn!("Get chain thoughts script not found in cache");
+                    return Err(UnifiedIntelligenceError::Internal("Script needs reloading".to_string()));
+                }
+                Err(UnifiedIntelligenceError::Redis(e))
+            })?;
+        
+        Ok(result)
+    }
     
     // Event Stream Methods
     
@@ -431,9 +476,4 @@ impl RedisManager {
         tracing::debug!("Published {} event to stream {}: {}", event_type, stream_key, event_id);
         Ok(event_id)
     }
-    
-    
-    
-    
-    
 }

@@ -43,8 +43,7 @@ pub enum UnifiedIntelligenceError {
     #[error("Internal error: {0}")]
     Internal(String),
     
-    #[error("Operation timed out after {0} seconds")]
-    Timeout(u64),
+    
     
     #[error("Configuration error: {0}")]
     Configuration(String),

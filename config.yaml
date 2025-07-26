@@ -1,67 +1,82 @@
-# UnifiedIntelligence Configuration
-# All values can be overridden by environment variables
-
-# Server configuration
 server:
-  name: "unified-intelligence"
-  version: "3.0.0"
-  default_instance_id: "test"
+  name: unified-intelligence
+  version: 3.0.0
+  default_instance_id: DT
 
-# Redis configuration
 redis:
-  # Connection settings
-  host: "localhost"
+  host: 127.0.0.1
   port: 6379
   database: 0
-  # Password can be set via REDIS_PASSWORD or REDIS_PASS env vars
-  
-  # Connection pool settings
+  default_ttl_seconds: 604800
   pool:
-    max_size: 16
+    max_size: 10
     timeout_seconds: 5
     create_timeout_seconds: 5
     recycle_timeout_seconds: 5
-  
-  # Default TTL for Redis keys (7 days)
-  default_ttl_seconds: 604800
 
-# Rate limiting configuration
 rate_limiter:
-  # Maximum requests per time window
   max_requests: 100
-  # Time window in seconds
   window_seconds: 60
 
-# Event stream configuration
 event_stream:
-  # Maximum events to keep per stream
+  enabled: true
+  stream_name: "unified_intelligence_events"
+  max_len: 10000
   max_length: 10000
-  # Use approximate trimming for performance
   approximate_trimming: true
 
-# Bloom filter configuration
 bloom_filter:
-  # False positive rate
+  enabled: false
   error_rate: 0.01
-  # Expected number of items
+  capacity: 100000
   expected_items: 100000
 
-# Time series configuration
 time_series:
-  # Retention period in milliseconds (24 hours)
-  retention_ms: 86400000
-  # Duplicate policy
-  duplicate_policy: "SUM"
+  enabled: true
+  retention_seconds: 2592000 # 30 days
+  retention_ms: 2592000000 # 30 days in milliseconds
+  duplicate_policy: "last"
 
-# Retry configuration
 retry:
-  # Maximum retry attempts
   max_attempts: 3
-  # Initial delay in milliseconds
+  min_delay_ms: 50
+  max_delay_ms: 500
+  factor: 2
   initial_delay_ms: 100
-  # Maximum delay in milliseconds
-  max_delay_ms: 5000
-  # Exponential backoff base
-  backoff_base: 2.0
-  # Jitter factor (0.0 to 1.0)
+  backoff_base: 2
   jitter_factor: 0.1
+
+boost_scores:
+  boost_weight: 1.0
+  search_weight: 1.0
+  tag_match: 2.0
+  category_match: 1.5
+  content_match: 1.0
+  importance_high: 3.0
+  importance_medium: 2.0
+  importance_low: 1.0
+  recency_boost: 1.5
+  chain_length_bonus: 0.5
+
+search:
+  max_results: 100
+  default_limit: 50
+  cache_ttl_seconds: 300
+  index_name: thoughts_idx
+  prefixes:
+    - "DT:Thoughts:"
+  boost_weights:
+    tag_match: 2.0
+    category_match: 1.5
+    time_decay: 0.8
+    relationship_strength: 1.2
+  fuzzy:
+    enabled: true
+    max_distance: 2
+    prefix_length: 2
+  ngram:
+    min: 2
+    max: 3
+  phonetic:
+    enabled: true
+    algorithm: double_metaphone

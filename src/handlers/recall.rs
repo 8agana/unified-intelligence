@@ -1,239 +1,73 @@
-use crate::error::Result;
-use crate::models::{Identity, ThoughtRecord};
-use crate::repository_traits::{IdentityRepository, SearchRepository, ThoughtRepository};
-use crate::service::UnifiedIntelligenceService;
-use crate::visual::VisualFeedback;
-use anyhow::anyhow;
-use rmcp::{HandlerError, HandlerResult, RequestParams, Tool, ToolHandler};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+use schemars::JsonSchema;
+use rmcp::model::{CallToolResult, Content, ErrorData};
+use crate::repository::ThoughtRepository;
+use tracing::{info, warn};
 
-#[derive(Debug, Deserialize)]
-struct RecallRequest {
-    query: String,
-    #[serde(default = "default_limit")]
-    limit: usize,
-    #[serde(default)]
-    include_chains: bool,
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UiRecallParams {
+    #[schemars(regex(pattern = r"^(thought|chain)$"))]
+    pub mode: String,
+    pub id: String,
 }
 
-fn default_limit() -> usize {
-    10
+pub struct RecallHandler<R: ThoughtRepository> {
+    repository: Arc<R>,
+    instance_id: String,
 }
 
-#[derive(Debug, Serialize)]
-struct RecallResponse {
-    query: String,
-    thoughts_found: usize,
-    thoughts: Vec<ThoughtSummary>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    chains: Option<Vec<ChainSummary>>,
-    context_summary: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ThoughtSummary {
-    id: String,
-    content: String,
-    timestamp: String,
-    importance: Option<f32>,
-    tags: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    framework: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ChainSummary {
-    chain_id: String,
-    thought_count: usize,
-    first_thought: String,
-    last_thought: String,
-}
-
-pub struct RecallHandler {
-    service: Arc<UnifiedIntelligenceService>,
-}
-
-impl RecallHandler {
-    pub fn new(service: Arc<UnifiedIntelligenceService>) -> Self {
-        Self { service }
+impl<R: ThoughtRepository> RecallHandler<R> {
+    pub fn new(repository: Arc<R>, instance_id: String) -> Self {
+        Self { repository, instance_id }
     }
 
-    pub fn tool() -> Tool {
-        Tool {
-            name: "ui_recall".to_string(),
-            description: Some("Search and recall relevant thoughts and memories from UnifiedIntelligence. This tool performs semantic search across all stored thoughts and can optionally include chain analysis.".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query to find relevant thoughts"
+    pub async fn recall(&self, params: UiRecallParams) -> std::result::Result<CallToolResult, ErrorData> {
+        // Validate mode string (regex validation should already handle this at deserialization)
+        match params.mode.as_str() {
+            "thought" => {
+                let thought_id = params.id;
+                
+                match self.repository.get_thought(&self.instance_id, &thought_id).await {
+                    Ok(Some(thought)) => {
+                        info!("Successfully recalled thought: {}", thought_id);
+                        let content = Content::json(thought)
+                            .map_err(|e| ErrorData::internal_error(format!("Failed to serialize thought: {}", e), None))?;
+                        Ok(CallToolResult::success(vec![content]))
                     },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of results to return (default: 10)",
-                        "minimum": 1,
-                        "maximum": 100
+                    Ok(None) => {
+                        warn!("Thought not found: {}", thought_id);
+                        Err(ErrorData::invalid_params(format!("Thought with ID {} not found.", thought_id), None))
                     },
-                    "include_chains": {
-                        "type": "boolean",
-                        "description": "Whether to include chain analysis in results (default: false)"
-                    }
-                },
-                "required": ["query"]
-            }),
-        }
-    }
-
-    async fn process_recall(&self, request: RecallRequest) -> Result<RecallResponse> {
-        let visual = VisualFeedback::new();
-        visual.thinking(&format!("Recalling thoughts for query: '{}'", request.query));
-
-        // Perform search
-        let search_results = self
-            .service
-            .search_repository()
-            .search_thoughts(&request.query, request.limit)
-            .await?;
-
-        if search_results.is_empty() {
-            visual.error("No thoughts found matching the query");
-            return Ok(RecallResponse {
-                query: request.query,
-                thoughts_found: 0,
-                thoughts: vec![],
-                chains: None,
-                context_summary: "No relevant thoughts found for this query.".to_string(),
-            });
-        }
-
-        visual.success(&format!("Found {} relevant thoughts", search_results.len()));
-
-        // Convert to summaries
-        let mut thought_summaries: Vec<ThoughtSummary> = search_results
-            .iter()
-            .map(|record| ThoughtSummary {
-                id: record.id.clone(),
-                content: record.content.clone(),
-                timestamp: record.timestamp.clone(),
-                importance: record.metadata.as_ref().and_then(|m| m.importance),
-                tags: record
-                    .metadata
-                    .as_ref()
-                    .and_then(|m| m.tags.clone())
-                    .unwrap_or_default(),
-                framework: record.metadata.as_ref().and_then(|m| m.framework.clone()),
-            })
-            .collect();
-
-        // Handle chain analysis if requested
-        let mut chains = None;
-        if request.include_chains {
-            visual.thinking("Analyzing thought chains...");
-            let mut chain_map: std::collections::HashMap<String, Vec<&ThoughtRecord>> = 
-                std::collections::HashMap::new();
-
-            for record in &search_results {
-                if let Some(chain_id) = &record.chain_id {
-                    chain_map.entry(chain_id.clone()).or_default().push(record);
+                    Err(e) => {
+                        warn!("Error recalling thought {}: {}", thought_id, e);
+                        Err(ErrorData::internal_error(format!("Error recalling thought: {}", e), None))
+                    },
                 }
-            }
+            },
+            "chain" => {
+                let chain_id = params.id;
 
-            if !chain_map.is_empty() {
-                let chain_summaries: Vec<ChainSummary> = chain_map
-                    .into_iter()
-                    .map(|(chain_id, thoughts)| ChainSummary {
-                        chain_id,
-                        thought_count: thoughts.len(),
-                        first_thought: thoughts
-                            .first()
-                            .map(|t| t.content.chars().take(100).collect())
-                            .unwrap_or_default(),
-                        last_thought: thoughts
-                            .last()
-                            .map(|t| t.content.chars().take(100).collect())
-                            .unwrap_or_default(),
-                    })
-                    .collect();
-                chains = Some(chain_summaries);
-            }
-        }
-
-        // Generate context summary
-        let context_summary = self.generate_context_summary(&search_results);
-
-        Ok(RecallResponse {
-            query: request.query,
-            thoughts_found: thought_summaries.len(),
-            thoughts: thought_summaries,
-            chains,
-            context_summary,
-        })
-    }
-
-    fn generate_context_summary(&self, thoughts: &[ThoughtRecord]) -> String {
-        // Analyze the thoughts to provide a high-level summary
-        let total = thoughts.len();
-        let with_chains = thoughts.iter().filter(|t| t.chain_id.is_some()).count();
-        let unique_frameworks: std::collections::HashSet<_> = thoughts
-            .iter()
-            .filter_map(|t| t.metadata.as_ref()?.framework.as_ref())
-            .collect();
-
-        let mut summary = format!("Found {} relevant thoughts. ", total);
-        
-        if with_chains > 0 {
-            summary.push_str(&format!("{} are part of thought chains. ", with_chains));
-        }
-        
-        if !unique_frameworks.is_empty() {
-            summary.push_str(&format!(
-                "Frameworks used: {}. ",
-                unique_frameworks
-                    .into_iter()
-                    .take(3)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-
-        // Add time range if available
-        if let (Some(first), Some(last)) = (thoughts.first(), thoughts.last()) {
-            if first.timestamp != last.timestamp {
-                summary.push_str(&format!(
-                    "Time span: {} to {}.",
-                    first.timestamp.split('T').next().unwrap_or(&first.timestamp),
-                    last.timestamp.split('T').next().unwrap_or(&last.timestamp)
-                ));
-            }
-        }
-
-        summary
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolHandler for RecallHandler {
-    async fn run(&self, params: RequestParams) -> HandlerResult {
-        let request: RecallRequest = serde_json::from_value(params.arguments)
-            .map_err(|e| HandlerError::InvalidParams(e.to_string()))?;
-
-        match self.process_recall(request).await {
-            Ok(response) => {
-                let content = vec![rmcp::types::TextContent {
-                    text: serde_json::to_string_pretty(&response)
-                        .unwrap_or_else(|_| "Failed to serialize response".to_string()),
+                match self.repository.get_chain_thoughts(&self.instance_id, &chain_id).await {
+                    Ok(thoughts) => {
+                        info!("Successfully recalled chain {}: {} thoughts", chain_id, thoughts.len());
+                        let content = Content::json(thoughts)
+                            .map_err(|e| ErrorData::internal_error(format!("Failed to serialize chain thoughts: {}", e), None))?;
+                        Ok(CallToolResult::success(vec![content]))
+                    },
+                    Err(e) => {
+                        warn!("Error recalling chain {}: {}", chain_id, e);
+                        Err(ErrorData::internal_error(format!("Error recalling chain: {}", e), None))
+                    },
                 }
-                .into()];
-                Ok(content)
-            }
-            Err(e) => {
-                let visual = VisualFeedback::new();
-                visual.error(&format!("Recall failed: {}", e));
-                Err(HandlerError::ToolError(e.to_string()))
+            },
+            _ => {
+                // This should never happen due to regex validation, but we handle it gracefully
+                warn!("Invalid recall mode: {}", params.mode);
+                Err(ErrorData::invalid_params(
+                    format!("Invalid recall mode '{}'. Must be 'thought' or 'chain'.", params.mode), 
+                    None
+                ))
             }
         }
     }

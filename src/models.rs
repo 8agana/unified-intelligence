@@ -49,7 +49,7 @@ pub struct ThoughtRecord {
     pub timestamp: String,
     pub chain_id: Option<String>,
     pub next_thought_needed: bool,
-    pub similarity: Option<f32>, // For semantic search results
+    
 }
 
 impl ThoughtRecord {
@@ -72,8 +72,7 @@ impl ThoughtRecord {
             timestamp: Utc::now().to_rfc3339(),
             chain_id,
             next_thought_needed,
-            similarity: None,
-        }
+            }
     }
 }
 
@@ -127,3 +126,5 @@ pub struct ChainMetadata {
     pub thought_count: i32,
     pub instance: String,
 }
+
+// RecallMode enum and UiRecallParams moved to handlers/recall.rs with string-based mode

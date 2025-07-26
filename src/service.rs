@@ -10,6 +10,7 @@ use tracing;
 
 use crate::error::UnifiedIntelligenceError;
 use crate::models::UiThinkParams;
+use crate::handlers::recall::UiRecallParams;
 use crate::config::Config;
 use crate::redis::RedisManager;
 use crate::repository::RedisThoughtRepository;
@@ -30,48 +31,66 @@ pub struct UnifiedIntelligenceService {
 impl UnifiedIntelligenceService {
     /// Create a new service instance
     pub async fn new() -> Result<Self, UnifiedIntelligenceError> {
+        tracing::info!("Service::new() - Starting initialization");
         // Load configuration
-        let config = Arc::new(Config::load().map_err(|e| 
+        let config = Arc::new(Config::load().map_err(|e| {
+            tracing::error!("Service::new() - Failed to load config: {}", e);
             UnifiedIntelligenceError::Configuration(format!("Failed to load config: {}", e))
-        )?);
+        })?);
+        tracing::info!("Service::new() - Configuration loaded");
         
         // Get instance ID from environment or config
         let instance_id = std::env::var("INSTANCE_ID")
             .unwrap_or_else(|_| config.server.default_instance_id.clone());
-        tracing::info!("Initializing UnifiedIntelligence service for instance: {}", instance_id);
+        tracing::info!("Service::new() - Initializing UnifiedIntelligence service for instance: {}", instance_id);
         
         // Initialize Redis with config
+        tracing::info!("Service::new() - Initializing RedisManager");
         let redis_manager = Arc::new(RedisManager::new_with_config(&config).await?);
+        tracing::info!("Service::new() - RedisManager initialized");
         
         // Initialize Bloom filter for this instance - DISABLED (requires RedisBloom)
+        tracing::info!("Service::new() - Initializing Bloom filter (if enabled)");
         // redis_manager.init_bloom_filter(&instance_id).await?;
+        tracing::info!("Service::new() - Bloom filter initialization skipped/completed");
         
         // Initialize event stream for this instance
+        tracing::info!("Service::new() - Initializing event stream");
         redis_manager.init_event_stream(&instance_id).await?;
+        tracing::info!("Service::new() - Event stream initialized");
         
         // Create repository with config and instance_id
+        tracing::info!("Service::new() - Creating RedisThoughtRepository");
         let repository = Arc::new(RedisThoughtRepository::new(
             redis_manager.clone(),
             config.clone(),
             instance_id.clone(),
         ));
+        tracing::info!("Service::new() - RedisThoughtRepository created");
         
         // Create validator
+        tracing::info!("Service::new() - Creating InputValidator");
         let validator = Arc::new(InputValidator::new());
+        tracing::info!("Service::new() - InputValidator created");
         
         // Create rate limiter with configured values
+        tracing::info!("Service::new() - Creating RateLimiter");
         let rate_limiter = Arc::new(RateLimiter::new(
             config.rate_limiter.max_requests as usize,
             config.rate_limiter.window_seconds as u64
         ));
+        tracing::info!("Service::new() - RateLimiter created");
         
         // Create handlers
+        tracing::info!("Service::new() - Creating ToolHandlers");
         let handlers = Arc::new(ToolHandlers::new(
             repository,
             instance_id.clone(),
             validator,
         ));
+        tracing::info!("Service::new() - ToolHandlers created");
         
+        tracing::info!("Service::new() - Service initialization complete");
         Ok(Self {
             tool_router: Self::tool_router(),
             handlers,
@@ -115,6 +134,33 @@ impl UnifiedIntelligenceService {
                         Err(ErrorData::internal_error(e.to_string(), None))
                     }
                 }
+            }
+        }
+    }
+
+    #[tool(description = "Retrieve thoughts and memories by ID or chain ID.")]
+    pub async fn ui_recall(
+        &self,
+        params: Parameters<UiRecallParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
+            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
+            return Err(ErrorData::invalid_params(
+                format!("Rate limit exceeded. Please slow down your requests."), 
+                None
+            ));
+        }
+        
+        match self.handlers.recall.recall(params.0).await {
+            Ok(response) => {
+                let content = Content::json(response)
+                    .map_err(|e| ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None))?;
+                Ok(CallToolResult::success(vec![content]))
+            },
+            Err(e) => {
+                tracing::error!("ui_recall error: {}", e);
+                Err(ErrorData::internal_error(format!("Error recalling thought: {}", e), None))
             }
         }
     }
