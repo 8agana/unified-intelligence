@@ -4,6 +4,7 @@ target/
 # Development files
 backup/
 BUILDME.md
+.grok/
 
 # IDE files
 .vscode/
