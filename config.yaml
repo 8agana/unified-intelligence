@@ -1,0 +1,82 @@
+server:
+  name: unified-intelligence
+  version: 3.0.0
+  default_instance_id: CC
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+  database: 0
+  default_ttl_seconds: 604800
+  pool:
+    max_size: 10
+    timeout_seconds: 5
+    create_timeout_seconds: 5
+    recycle_timeout_seconds: 5
+
+rate_limiter:
+  max_requests: 100
+  window_seconds: 60
+
+event_stream:
+  enabled: true
+  stream_name: "unified_intelligence_events"
+  max_len: 10000
+  max_length: 10000
+  approximate_trimming: true
+
+bloom_filter:
+  enabled: false
+  error_rate: 0.01
+  capacity: 100000
+  expected_items: 100000
+
+time_series:
+  enabled: true
+  retention_seconds: 2592000 # 30 days
+  retention_ms: 2592000000 # 30 days in milliseconds
+  duplicate_policy: "last"
+
+retry:
+  max_attempts: 3
+  min_delay_ms: 50
+  max_delay_ms: 500
+  factor: 2
+  initial_delay_ms: 100
+  backoff_base: 2
+  jitter_factor: 0.1
+
+boost_scores:
+  boost_weight: 1.0
+  search_weight: 1.0
+  tag_match: 2.0
+  category_match: 1.5
+  content_match: 1.0
+  importance_high: 3.0
+  importance_medium: 2.0
+  importance_low: 1.0
+  recency_boost: 1.5
+  chain_length_bonus: 0.5
+
+search:
+  max_results: 100
+  default_limit: 50
+  cache_ttl_seconds: 300
+  index_name: thoughts_idx
+  prefixes:
+    - "DT:Thoughts:"
+  boost_weights:
+    tag_match: 2.0
+    category_match: 1.5
+    time_decay: 0.8
+    relationship_strength: 1.2
+  fuzzy:
+    enabled: true
+    max_distance: 2
+    prefix_length: 2
+  ngram:
+    min: 2
+    max: 3
+  phonetic:
+    enabled: true
+    algorithm: double_metaphone
