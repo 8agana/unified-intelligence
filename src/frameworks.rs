@@ -84,7 +84,6 @@ impl ThinkingFramework {
     }
     
     /// Safe parse that returns Socratic as fallback
-    #[allow(dead_code)]
     pub fn from_string_safe(framework: &str) -> Self {
         Self::from_string(framework).unwrap_or(Self::Socratic)
     }

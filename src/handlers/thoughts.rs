@@ -24,18 +24,25 @@ pub trait ThoughtsHandler {
 impl<R: ThoughtRepository> ThoughtsHandler for super::ToolHandlers<R> {
     /// Handle ui_think tool
     async fn ui_think(&self, params: UiThinkParams) -> Result<ThinkResponse> {
-        // Determine framework with validation
+        // Determine framework with graceful fallback to Socratic on invalid
         let framework = if let Some(ref framework_str) = params.framework {
-            match ThinkingFramework::from_string(framework_str) {
-                Ok(f) => f,
-                Err(e) => {
-                    self.visual.error(&format!("Framework error: {}", e));
-                    return Err(UnifiedIntelligenceError::Validation {
-                        field: "framework".to_string(),
-                        reason: e.to_string(),
-                    });
-                }
+            // Use safe parsing that defaults to Socratic on invalid input
+            let parsed = ThinkingFramework::from_string_safe(framework_str);
+            
+            // Log a warning if the framework was invalid but continue with default
+            if ThinkingFramework::from_string(framework_str).is_err() {
+                tracing::warn!(
+                    "Invalid framework '{}' provided, defaulting to Socratic", 
+                    framework_str
+                );
+                // Note: Using info log instead of visual warning since visual doesn't have warning method
+                tracing::info!(
+                    "Framework '{}' not recognized, using Socratic default", 
+                    framework_str
+                );
             }
+            
+            parsed
         } else {
             ThinkingFramework::Socratic
         };
