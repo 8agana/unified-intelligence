@@ -329,7 +329,7 @@ mod tests {
             create_test_thought("2", "Another different thought"),
         ];
 
-        let results = engine.search_thoughts(&thoughts, "test", None).await.unwrap();
+        let results = engine.search_thoughts(&thoughts, "test", None).await.expect("Search should succeed in test");
         assert!(!results.is_empty());
         // When exact match + fuzzy/other matches occur, it becomes Combined
         assert!(matches!(results[0].match_type, SearchMatchType::Exact | SearchMatchType::Combined));
@@ -342,7 +342,7 @@ mod tests {
             create_test_thought("1", "This is a testing implementation"),
         ];
 
-        let results = engine.search_thoughts(&thoughts, "test", None).await.unwrap();
+        let results = engine.search_thoughts(&thoughts, "test", None).await.expect("Search should succeed in test");
         assert!(!results.is_empty());
         assert!(results[0].fuzzy_score.is_some());
     }

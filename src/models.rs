@@ -1,5 +1,21 @@
-use serde::{Deserialize, Serialize, Deserializer};
 use chrono::Utc;
+use serde::{Deserialize, Deserializer, Serialize};
+
+fn default_importance() -> Option<i32> {
+    Some(5)
+}
+
+fn default_relevance() -> Option<i32> {
+    Some(5)
+}
+
+fn default_category() -> Option<String> {
+    Some("general".to_string())
+}
+
+fn default_tags() -> Option<Vec<String>> {
+    Some(vec![])
+}
 
 /// Flexible integer deserializer to handle string, float, or int inputs from different MCP clients
 fn deserialize_flexible_int<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
@@ -13,14 +29,12 @@ where
         Float(f64),
         String(String),
     }
-    
+
     let value = FlexibleInt::deserialize(deserializer)?;
     match value {
         FlexibleInt::Int(i) => Ok(Some(i)),
         FlexibleInt::Float(f) => Ok(Some(f as i32)),
-        FlexibleInt::String(s) => {
-            s.parse::<i32>().map(Some).map_err(serde::de::Error::custom)
-        }
+        FlexibleInt::String(s) => s.parse::<i32>().map(Some).map_err(serde::de::Error::custom),
     }
 }
 
@@ -36,14 +50,12 @@ where
         Float(f64),
         String(String),
     }
-    
+
     let value = FlexibleInt::deserialize(deserializer)?;
     match value {
         FlexibleInt::Int(i) => Ok(i),
         FlexibleInt::Float(f) => Ok(f as i32),
-        FlexibleInt::String(s) => {
-            s.parse::<i32>().map_err(serde::de::Error::custom)
-        }
+        FlexibleInt::String(s) => s.parse::<i32>().map_err(serde::de::Error::custom),
     }
 }
 
@@ -52,40 +64,53 @@ where
 pub struct UiThinkParams {
     #[schemars(description = "The thought content to process")]
     pub thought: String,
-    
+
     #[schemars(description = "Current thought number in sequence")]
     #[serde(deserialize_with = "deserialize_flexible_int_required")]
     pub thought_number: i32,
-    
+
     #[schemars(description = "Total number of thoughts in sequence")]
     #[serde(deserialize_with = "deserialize_flexible_int_required")]
     pub total_thoughts: i32,
-    
+
     #[schemars(description = "Whether another thought is needed")]
     pub next_thought_needed: bool,
-    
+
     #[schemars(description = "Optional chain ID to link thoughts together")]
     pub chain_id: Option<String>,
-    
-    #[schemars(description = "Optional thinking framework: 'ooda', 'socratic', 'first_principles', 'systems', 'root_cause', 'swot', 'sequential', 'remember', 'deepremember'")]
+
+    #[schemars(
+        description = "Optional thinking framework: 'ooda', 'socratic', 'first_principles', 'systems', 'root_cause', 'swot', 'sequential', 'remember', 'deepremember'"
+    )]
     pub framework: Option<String>,
-    
+
     // NEW METADATA FIELDS FOR FEEDBACK LOOP SYSTEM
     #[schemars(description = "Importance score from 1-10 scale")]
-    #[serde(deserialize_with = "deserialize_flexible_int")]
+    #[serde(
+        deserialize_with = "deserialize_flexible_int",
+        default = "default_importance"
+    )]
     pub importance: Option<i32>,
-    
+
     #[schemars(description = "Relevance score from 1-10 scale (to current task)")]
-    #[serde(deserialize_with = "deserialize_flexible_int")]
+    #[serde(
+        deserialize_with = "deserialize_flexible_int",
+        default = "default_relevance"
+    )]
     pub relevance: Option<i32>,
-    
-    #[schemars(description = "Tags for categorization (e.g., ['architecture', 'redis', 'critical'])")]
+
+    #[schemars(
+        description = "Tags for categorization (e.g., ['architecture', 'redis', 'critical'])"
+    )]
+    #[serde(default = "default_tags")]
     pub tags: Option<Vec<String>>,
-    
-    #[schemars(description = "Category: 'technical', 'strategic', 'operational', or 'relationship'")]
+
+    #[schemars(
+        description = "Category: 'technical', 'strategic', 'operational', or 'relationship'"
+    )]
+    #[serde(default = "default_category")]
     pub category: Option<String>,
 }
-
 
 /// Core thought record structure stored in Redis
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -108,6 +133,7 @@ pub struct ThoughtRecord {
 
 impl ThoughtRecord {
     /// Create a new thought record with generated ID and timestamp
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         instance: String,
         thought: String,
@@ -136,10 +162,9 @@ impl ThoughtRecord {
             relevance,
             tags,
             category,
-            }
+        }
     }
 }
-
 
 /// Response from ui_think tool
 #[derive(Debug, Serialize)]

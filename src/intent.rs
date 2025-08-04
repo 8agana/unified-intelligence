@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::error::{Result, UnifiedIntelligenceError};
-use crate::models::{QueryIntent, GroqRequest, ChatMessage};
+use crate::models::{ChatMessage, GroqRequest, QueryIntent};
 use crate::transport::Transport;
 
 pub struct GroqIntent {
@@ -84,7 +84,7 @@ Output:
 
         let user_message = ChatMessage {
             role: "user".to_string(),
-            content: format!("User Query: {}", query),
+            content: format!("User Query: {query}"),
         };
 
         let request = GroqRequest {
@@ -99,13 +99,14 @@ Output:
 
         if let Some(choice) = groq_response.choices.first() {
             let json_string = choice.message.content.clone();
-            serde_json::from_str(&json_string)
-                .map_err(|e| UnifiedIntelligenceError::Internal(
-                    format!("Failed to deserialize Groq intent JSON: {}. Raw: {}", e, json_string)
+            serde_json::from_str(&json_string).map_err(|e| {
+                UnifiedIntelligenceError::Internal(format!(
+                    "Failed to deserialize Groq intent JSON: {e}. Raw: {json_string}"
                 ))
+            })
         } else {
             Err(UnifiedIntelligenceError::Internal(
-                "Groq API returned empty choices for intent parsing".to_string()
+                "Groq API returned empty choices for intent parsing".to_string(),
             ))
         }
     }
@@ -114,7 +115,7 @@ Output:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{GroqResponse, ChatMessage, Choice};
+    use crate::models::{ChatMessage, Choice, GroqResponse};
     use crate::transport::Transport;
     use async_trait::async_trait;
     use std::sync::Mutex;
@@ -126,18 +127,25 @@ mod tests {
 
     impl MockTransport {
         fn new(responses: Vec<GroqResponse>) -> Self {
-            MockTransport { responses: Mutex::new(responses) }
+            MockTransport {
+                responses: Mutex::new(responses),
+            }
         }
     }
 
     #[async_trait]
     impl Transport for MockTransport {
         async fn chat(&self, _req: &GroqRequest) -> Result<GroqResponse> {
-            let mut responses = self.responses.lock().unwrap();
+            let mut responses = self
+                .responses
+                .lock()
+                .expect("Mock transport mutex should not be poisoned");
             if let Some(response) = responses.pop() {
                 Ok(response)
             } else {
-                Err(UnifiedIntelligenceError::Internal("No more mock responses".to_string()))
+                Err(UnifiedIntelligenceError::Internal(
+                    "No more mock responses".to_string(),
+                ))
             }
         }
     }
@@ -154,17 +162,33 @@ mod tests {
                             "relative_timeframe": "yesterday"
                         },
                         "synthesis_style": "chronological"
-                    }"#.to_string(),
+                    }"#
+                    .to_string(),
                 },
             }],
         };
         let mock_transport = MockTransport::new(vec![mock_response]);
         let groq_intent = GroqIntent::new(Arc::new(mock_transport), "test-model".to_string());
 
-        let query_intent = groq_intent.parse("What did Gem and Sam do yesterday in chronological order?").await.unwrap();
+        let query_intent = groq_intent
+            .parse("What did Gem and Sam do yesterday in chronological order?")
+            .await
+            .expect("Intent parsing should succeed in test");
 
         assert_eq!(query_intent.original_query, "What did Gem and Sam do?");
-        assert_eq!(query_intent.temporal_filter.unwrap().relative_timeframe.unwrap(), "yesterday");
-        assert_eq!(query_intent.synthesis_style.unwrap(), "chronological");
+        assert_eq!(
+            query_intent
+                .temporal_filter
+                .expect("Should have temporal filter")
+                .relative_timeframe
+                .expect("Should have relative timeframe"),
+            "yesterday"
+        );
+        assert_eq!(
+            query_intent
+                .synthesis_style
+                .expect("Should have synthesis style"),
+            "chronological"
+        );
     }
 }

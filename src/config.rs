@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
-use serde::{Deserialize, Serialize};
 use tracing;
 
 /// Main configuration structure for UnifiedIntelligence
@@ -97,9 +97,30 @@ pub struct GroqConfig {
 impl Config {
     /// Load configuration from file with environment variable overrides
     pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+        // Load environment variables from .env files
+        // Try multiple locations since DT runs from different working directory
+        let env_paths = [
+            "/Users/samuelatagana/Projects/LegacyMind/.env",  // Absolute path to centralized .env
+            "../.env",                                         // Parent directory
+            ".env",                                            // Current directory
+        ];
+        
+        let mut env_loaded = false;
+        for path in &env_paths {
+            if dotenvy::from_path(path).is_ok() {
+                tracing::info!("Loaded .env from: {}", path);
+                env_loaded = true;
+                break;
+            }
+        }
+        
+        if !env_loaded {
+            tracing::warn!("No .env file found in any expected location");
+        }
+        
         // Default config path
         let config_path = env::var("UI_CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
-        
+
         // Load config from file if it exists
         let mut config = if Path::new(&config_path).exists() {
             let contents = fs::read_to_string(&config_path)?;
@@ -110,16 +131,16 @@ impl Config {
             tracing::warn!("Config file not found at {}, using defaults", config_path);
             Self::default()
         };
-        
+
         // Apply environment variable overrides
         config.apply_env_overrides();
-        
+
         // Validate configuration
         config.validate()?;
-        
+
         Ok(config)
     }
-    
+
     /// Apply environment variable overrides
     fn apply_env_overrides(&mut self) {
         // Server overrides
@@ -132,7 +153,7 @@ impl Config {
         if let Ok(instance_id) = env::var("INSTANCE_ID") {
             self.server.default_instance_id = instance_id;
         }
-        
+
         // Redis overrides
         if let Ok(host) = env::var("REDIS_HOST") {
             self.redis.host = host;
@@ -147,14 +168,14 @@ impl Config {
                 self.redis.database = db_num;
             }
         }
-        
+
         // Pool overrides
         if let Ok(pool_size) = env::var("UI_REDIS_POOL_SIZE") {
             if let Ok(size) = pool_size.parse() {
                 self.redis.pool.max_size = size;
             }
         }
-        
+
         // Rate limiter overrides
         if let Ok(max_requests) = env::var("UI_RATE_LIMIT_MAX_REQUESTS") {
             if let Ok(max) = max_requests.parse() {
@@ -166,21 +187,21 @@ impl Config {
                 self.rate_limiter.window_seconds = window_secs;
             }
         }
-        
+
         // Event stream overrides
         if let Ok(max_length) = env::var("UI_EVENT_STREAM_MAX_LENGTH") {
             if let Ok(max) = max_length.parse() {
                 self.event_stream.max_length = max;
             }
         }
-        
+
         // Retry overrides
         if let Ok(jitter) = env::var("UI_RETRY_JITTER_FACTOR") {
             if let Ok(jitter_val) = jitter.parse() {
                 self.retry.jitter_factor = jitter_val;
             }
         }
-        
+
         // Qdrant overrides
         if let Ok(threshold) = env::var("QDRANT_SIMILARITY_THRESHOLD") {
             if let Ok(threshold_val) = threshold.parse() {
@@ -210,14 +231,14 @@ impl Config {
             self.groq.model_deep = model_deep;
         }
     }
-    
+
     /// Validate configuration
     fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
         // Validate Redis configuration
         if self.redis.port == 0 {
             return Err("Redis port cannot be 0".into());
         }
-        
+
         // Validate rate limiter
         if self.rate_limiter.max_requests == 0 {
             return Err("Rate limiter max_requests cannot be 0".into());
@@ -225,17 +246,17 @@ impl Config {
         if self.rate_limiter.window_seconds == 0 {
             return Err("Rate limiter window_seconds cannot be 0".into());
         }
-        
+
         // Validate bloom filter
         if self.bloom_filter.error_rate <= 0.0 || self.bloom_filter.error_rate >= 1.0 {
             return Err("Bloom filter error rate must be between 0.0 and 1.0".into());
         }
-        
+
         // Validate retry
         if self.retry.jitter_factor < 0.0 || self.retry.jitter_factor > 1.0 {
             return Err("Retry jitter factor must be between 0.0 and 1.0".into());
         }
-        
+
         // Validate Qdrant configuration
         if self.qdrant.similarity_threshold < 0.0 || self.qdrant.similarity_threshold > 1.0 {
             return Err("Qdrant similarity threshold must be between 0.0 and 1.0".into());
@@ -243,36 +264,49 @@ impl Config {
         if self.qdrant.port == 0 {
             return Err("Qdrant port cannot be 0".into());
         }
-        
+
+        // Validate Groq API key
+        if self.groq.api_key == "PLACEHOLDER_GROQ_API_KEY" || self.groq.api_key.is_empty() {
+            return Err("GROQ_API_KEY environment variable must be set".into());
+        }
+
         Ok(())
     }
-    
+
     /// Get Redis URL with password from environment
     pub fn get_redis_url(&self) -> String {
         let password = env::var("REDIS_PASSWORD")
             .or_else(|_| env::var("REDIS_PASS"))
             .unwrap_or_else(|_| {
-                tracing::warn!("REDIS_PASSWORD not set, assuming no password for local development.");
+                tracing::warn!(
+                    "REDIS_PASSWORD not set, assuming no password for local development."
+                );
                 "".to_string()
             });
-        
+
         if password.is_empty() {
-            format!("redis://{}:{}/{}", self.redis.host, self.redis.port, self.redis.database)
+            format!(
+                "redis://{}:{}/{}",
+                self.redis.host, self.redis.port, self.redis.database
+            )
         } else {
-            format!("redis://:{}@{}:{}/{}", password, self.redis.host, self.redis.port, self.redis.database)
+            format!(
+                "redis://:{}@{}:{}/{}",
+                password, self.redis.host, self.redis.port, self.redis.database
+            )
         }
     }
-    
+
     /// Get pool timeout as Duration
     pub fn get_pool_timeout(&self) -> Duration {
         Duration::from_secs(self.redis.pool.timeout_seconds)
     }
-    
+
     /// Get pool create timeout as Duration
     pub fn get_pool_create_timeout(&self) -> Duration {
         Duration::from_secs(self.redis.pool.create_timeout_seconds)
     }
-    
+
     /// Get pool recycle timeout as Duration
     pub fn get_pool_recycle_timeout(&self) -> Duration {
         Duration::from_secs(self.redis.pool.recycle_timeout_seconds)
@@ -328,7 +362,10 @@ impl Default for Config {
                 port: 6334,
             },
             groq: GroqConfig {
-                api_key: env::var("GROQ_API_KEY").expect("GROQ_API_KEY environment variable not set"),
+                api_key: env::var("GROQ_API_KEY").unwrap_or_else(|_| {
+                    tracing::warn!("GROQ_API_KEY not set, using placeholder");
+                    "PLACEHOLDER_GROQ_API_KEY".to_string()
+                }),
                 intent_model: "llama3-8b-8192".to_string(),
                 model_fast: "llama3-8b-8192".to_string(),
                 model_deep: "llama3-70b-8192".to_string(),

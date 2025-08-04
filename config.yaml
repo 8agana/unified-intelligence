@@ -87,3 +87,14 @@ search:
   phonetic:
     enabled: true
     algorithm: double_metaphone
+
+groq:
+  api_key: ${GROQ_API_KEY}
+  intent_model: llama3-8b-8192
+  model_fast: llama3-8b-8192
+  model_deep: llama3-70b-8192
+
+openai:
+  api_key: ${OPENAI_API_KEY}
+  embedding_model: text-embedding-3-small
+  embedding_dimensions: 1536

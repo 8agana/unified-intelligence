@@ -1,19 +1,19 @@
+pub mod help;
+pub mod recall;
 /// Handler modules for UnifiedIntelligence MCP tools
 pub mod thoughts;
-pub mod recall;
-pub mod help;
 
-use std::sync::Arc;
+use crate::config::Config;
+use crate::qdrant_service::QdrantService;
+use crate::redis::RedisManager;
 use crate::repository::ThoughtRepository;
 use crate::validation::InputValidator;
 use crate::visual::VisualOutput;
-use crate::redis::RedisManager;
-use crate::qdrant_service::QdrantService;
-use crate::config::Config;
+use std::sync::Arc;
 
 // Re-export handler traits from submodules
+pub use help::{HelpHandler, HelpHandlerTrait, UiHelpParams};
 pub use recall::RecallHandler;
-pub use help::{HelpHandler, UiHelpParams, HelpHandlerTrait};
 
 /// Handler for MCP tool operations
 pub struct ToolHandlers<R: ThoughtRepository> {
@@ -55,15 +55,11 @@ impl<R: ThoughtRepository> ToolHandlers<R> {
 mod tests {
     use super::*;
     use crate::repository::MockThoughtRepository;
-    
+
     fn create_test_handler() -> ToolHandlers<MockThoughtRepository> {
         let repository = Arc::new(MockThoughtRepository::new());
         let validator = Arc::new(InputValidator::new());
-        
-        ToolHandlers::new(
-            repository,
-            "test".to_string(),
-            validator,
-        )
+
+        ToolHandlers::new(repository, "test".to_string(), validator)
     }
 }

@@ -228,6 +228,6 @@ mod tests {
         
         cache.insert("test-query".to_string(), thoughts.clone());
         assert!(cache.get("test-query").is_some());
-        assert_eq!(cache.get("test-query").unwrap().len(), 1);
+        assert_eq!(cache.get("test-query").expect("Cache should contain test query").len(), 1);
     }
 }

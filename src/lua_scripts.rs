@@ -2,17 +2,17 @@
 /// These scripts ensure atomicity and prevent race conditions in multi-step operations
 
 /// Script to atomically store a thought with all associated operations
-/// 
+///
 /// KEYS[1] = thought key ({instance}:Thoughts:{uuid})
 /// KEYS[2] = bloom filter key ({instance}:bloom:thoughts)
 /// KEYS[3] = time series key ({instance}:metrics:thought_count)
 /// KEYS[4] = chain key ({instance}:chains:{chain_id}) - optional
-/// 
+///
 /// ARGV[1] = thought JSON data
 /// ARGV[2] = thought UUID
 /// ARGV[3] = timestamp (epoch seconds)
 /// ARGV[4] = chain_id (optional)
-/// 
+///
 /// Returns: "OK" on success, "DUPLICATE" if already exists
 pub const STORE_THOUGHT_SCRIPT: &str = r#"
 -- Check if thought already exists
@@ -65,13 +65,13 @@ return 'OK'
 "#;
 
 /// Script to atomically get a thought and update access metrics
-/// 
+///
 /// KEYS[1] = thought key ({instance}:Thoughts:{uuid})
 /// KEYS[2] = access count key ({instance}:metrics:access_count)
 /// KEYS[3] = last access key ({instance}:Thoughts:{uuid}:last_access)
-/// 
+///
 /// ARGV[1] = timestamp (epoch seconds)
-/// 
+///
 /// Returns: thought JSON or nil if not found
 pub const GET_THOUGHT_SCRIPT: &str = r#"
 local thought = redis.call('JSON.GET', KEYS[1], '.')
@@ -87,15 +87,15 @@ return thought
 "#;
 
 /// Script to atomically search thoughts using RediSearch FT.SEARCH
-/// 
+///
 /// KEYS[1] = RediSearch index name (e.g., "idx:thoughts")
-/// 
+///
 /// ARGV[1] = search query (e.g., "@content:Rust")
 /// ARGV[2] = offset
 /// ARGV[3] = limit
-/// 
+///
 /// Returns: array of [total_count, thought_json1, thought_json2, ...]
-/// 
+///
 /// NOTE: This script assumes a RediSearch index named by KEYS[1] exists and is properly configured
 /// to index thought content.
 pub const SEARCH_THOUGHTS_SCRIPT: &str = r#"
@@ -126,13 +126,13 @@ return results
 "#;
 
 /// Script to atomically update thought chain operations
-/// 
+///
 /// KEYS[1] = chain key ({instance}:chains:{chain_id})
 /// KEYS[2] = thought key ({instance}:Thoughts:{uuid})
-/// 
+///
 /// ARGV[1] = operation ('add' or 'remove')
 /// ARGV[2] = thought UUID
-/// 
+///
 /// Returns: 1 on success, 0 on failure
 pub const UPDATE_CHAIN_SCRIPT: &str = r#"
 local operation = ARGV[1]
@@ -162,11 +162,11 @@ return 1
 "#;
 
 /// Script to get chain thoughts with proper ordering
-/// 
+///
 /// KEYS[1] = chain key ({instance}:chains:{chain_id})
-/// 
+///
 /// ARGV[1] = instance (e.g., "Claude")
-/// 
+///
 /// Returns: array of thought JSONs in chain order
 pub const GET_CHAIN_THOUGHTS_SCRIPT: &str = r#"
 local chain_ids = redis.call('LRANGE', KEYS[1], 0, -1)
@@ -186,11 +186,11 @@ return thoughts
 "#;
 
 /// Script to cleanup expired data
-/// 
+///
 /// KEYS[1] = pattern for keys to check (e.g., instance:Thoughts:*)
-/// 
+///
 /// ARGV[1] = expiration timestamp
-/// 
+///
 /// Returns: number of keys cleaned up
 pub const CLEANUP_EXPIRED_SCRIPT: &str = r#"
 local pattern = KEYS[1]

@@ -1,8 +1,8 @@
 use anyhow::Result;
 use async_openai::{
-    types::{CreateEmbeddingRequestArgs, EmbeddingInput},
     Client,
     config::OpenAIConfig,
+    types::{CreateEmbeddingRequestArgs, EmbeddingInput},
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -48,12 +48,18 @@ pub async fn generate_openai_embedding(
 
     let response = client.embeddings().create(request).await?;
 
-    let embedding = response.data.into_iter().next()
+    let embedding = response
+        .data
+        .into_iter()
+        .next()
         .ok_or_else(|| UnifiedIntelligenceError::Other(anyhow::anyhow!("No embeddings returned")))?
         .embedding;
 
     // Cache the embedding for 7 days
-    if let Err(e) = redis_manager.set_cached_embedding(text, &embedding, 86400 * 7).await {
+    if let Err(e) = redis_manager
+        .set_cached_embedding(text, &embedding, 86400 * 7)
+        .await
+    {
         warn!("Failed to cache embedding: {}", e);
     }
 

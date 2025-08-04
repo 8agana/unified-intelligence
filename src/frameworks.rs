@@ -1,6 +1,5 @@
 /// Thinking frameworks module for unified-intelligence
 /// Provides cognitive enhancement layers
-
 use colored::*;
 use std::fmt;
 use thiserror::Error;
@@ -11,15 +10,15 @@ use thiserror::Error;
 pub enum FrameworkError {
     #[error("Invalid framework name '{name}'. Valid frameworks: {valid_list}")]
     InvalidFramework { name: String, valid_list: String },
-    
+
     #[error("Framework processing timeout after {timeout_ms}ms")]
     #[allow(dead_code)]
     ProcessingTimeout { timeout_ms: u64 },
-    
+
     #[error("Framework processing failed: {reason}")]
     #[allow(dead_code)]
     ProcessingFailed { reason: String },
-    
+
     #[error("Empty framework name provided")]
     EmptyFrameworkName,
 }
@@ -38,14 +37,14 @@ impl FrameworkError {
 /// Available thinking frameworks
 #[derive(Debug, Clone, PartialEq)]
 pub enum ThinkingFramework {
-    OODA,             // Observe, Orient, Decide, Act
-    Socratic,         // Default - Question-based analysis
-    FirstPrinciples,  // Break down to fundamental truths
-    Systems,          // Understand interconnections and patterns
-    RootCause,        // Five Whys methodology
-    SWOT,             // Strengths, Weaknesses, Opportunities, Threats
-    Remember,         // Groq-powered memory search (fast - llama3-8b)
-    DeepRemember,     // Groq-powered deep synthesis (heavy - llama3-70b)
+    OODA,            // Observe, Orient, Decide, Act
+    Socratic,        // Default - Question-based analysis
+    FirstPrinciples, // Break down to fundamental truths
+    Systems,         // Understand interconnections and patterns
+    RootCause,       // Five Whys methodology
+    SWOT,            // Strengths, Weaknesses, Opportunities, Threats
+    Remember,        // Groq-powered memory search (fast - llama3-8b)
+    DeepRemember,    // Groq-powered deep synthesis (heavy - llama3-70b)
 }
 
 impl fmt::Display for ThinkingFramework {
@@ -69,7 +68,7 @@ impl ThinkingFramework {
         if framework.trim().is_empty() {
             return Err(FrameworkError::EmptyFrameworkName);
         }
-        
+
         match framework.to_lowercase().trim() {
             "ooda" => Ok(Self::OODA),
             "socratic" => Ok(Self::Socratic),
@@ -82,7 +81,7 @@ impl ThinkingFramework {
             _ => Err(FrameworkError::invalid_framework(framework)),
         }
     }
-    
+
     /// Safe parse that returns Socratic as fallback
     pub fn from_string_safe(framework: &str) -> Self {
         Self::from_string(framework).unwrap_or(Self::Socratic)
@@ -161,7 +160,7 @@ impl FrameworkProcessor {
     fn process_ooda(&self, _thought: &str, thought_number: i32) -> FrameworkResult {
         let stage = match thought_number % 4 {
             1 => "Observe",
-            2 => "Orient", 
+            2 => "Orient",
             3 => "Decide",
             0 => "Act",
             _ => "Observe",
@@ -261,12 +260,12 @@ impl FrameworkProcessor {
     /// Root Cause Analysis (Five Whys) framework
     fn process_root_cause(&self, _thought: &str, thought_number: i32) -> FrameworkResult {
         let why_number = std::cmp::min(thought_number, 5);
-        let prompt = format!("Why #{}: Why is this happening? (Dig deeper into the root cause)", why_number);
+        let prompt = format!(
+            "Why #{}: Why is this happening? (Dig deeper into the root cause)",
+            why_number
+        );
 
-        let prompts = vec![
-            prompt,
-            "What evidence supports this cause?".to_string(),
-        ];
+        let prompts = vec![prompt, "What evidence supports this cause?".to_string()];
 
         FrameworkResult {
             _framework: self.framework.clone(),
@@ -298,14 +297,16 @@ impl FrameworkProcessor {
             })),
         }
     }
-    
+
     /// Remember framework - Groq-powered memory search
     fn process_remember(&self, _thought: &str) -> FrameworkResult {
         // This is a placeholder - actual Groq integration happens in the handler
         FrameworkResult {
             _framework: self.framework.clone(),
             prompts: vec![],
-            insights: vec!["Using Groq (fast model) to search memory and create follow-up thought".to_string()],
+            insights: vec![
+                "Using Groq (fast model) to search memory and create follow-up thought".to_string(),
+            ],
             _metadata: Some(serde_json::json!({
                 "method": "groq_search",
                 "model": "llama3-8b-8192",
@@ -313,7 +314,7 @@ impl FrameworkProcessor {
             })),
         }
     }
-    
+
     /// Deep Remember framework - Groq-powered deep synthesis
     fn process_deep_remember(&self, _thought: &str) -> FrameworkResult {
         // This is a placeholder - actual Groq integration happens in the handler
@@ -361,15 +362,13 @@ impl FrameworkVisual {
     /// Display framework prompts
     pub fn display_prompts(prompts: &[String]) {
         if !prompts.is_empty() {
-            eprintln!("   {} {}", 
+            eprintln!(
+                "   {} {}",
                 "💭".bright_cyan(),
                 "Framework prompts:".bright_cyan()
             );
             for (i, prompt) in prompts.iter().enumerate() {
-                eprintln!("      {}. {}", 
-                    (i + 1).to_string().cyan(),
-                    prompt.white()
-                );
+                eprintln!("      {}. {}", (i + 1).to_string().cyan(), prompt.white());
             }
         }
     }
@@ -378,10 +377,7 @@ impl FrameworkVisual {
     pub fn display_insights(insights: &[String]) {
         if !insights.is_empty() {
             for insight in insights {
-                eprintln!("   {} {}", 
-                    "💡".bright_yellow(),
-                    insight.yellow()
-                );
+                eprintln!("   {} {}", "💡".bright_yellow(), insight.yellow());
             }
         }
     }

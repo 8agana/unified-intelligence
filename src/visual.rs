@@ -12,7 +12,8 @@ impl VisualOutput {
 
     /// Display thought storage beginning
     pub fn thought_start(&self, thought_number: i32, total_thoughts: i32) {
-        eprintln!("{} {}{}{}", 
+        eprintln!(
+            "{} {}{}{}",
             "🧠".blue(),
             "Thought ".bright_blue(),
             format!("{}/{}", thought_number, total_thoughts).bright_white(),
@@ -31,7 +32,7 @@ impl VisualOutput {
                 // Simple word wrap
                 let words: Vec<&str> = line.split_whitespace().collect();
                 let mut current_line = String::new();
-                
+
                 for word in words {
                     if current_line.len() + word.len() + 1 <= max_width {
                         if !current_line.is_empty() {
@@ -57,12 +58,14 @@ impl VisualOutput {
     /// Display chain information
     pub fn chain_info(&self, chain_id: &str, is_new: bool) {
         if is_new {
-            eprintln!("   {} {}", 
+            eprintln!(
+                "   {} {}",
                 "⛓️".green(),
                 format!("New chain: {}", Self::truncate_uuid(chain_id)).bright_green()
             );
         } else {
-            eprintln!("   {} {}", 
+            eprintln!(
+                "   {} {}",
                 "⛓️".green(),
                 format!("Chain: {}", Self::truncate_uuid(chain_id)).green()
             );
@@ -71,7 +74,8 @@ impl VisualOutput {
 
     /// Display thought storage success
     pub fn thought_stored(&self, thought_id: &str) {
-        eprintln!("   {} {}", 
+        eprintln!(
+            "   {} {}",
             "✅".bright_green(),
             format!("Stored: {}", Self::truncate_uuid(thought_id)).green()
         );
@@ -79,23 +83,22 @@ impl VisualOutput {
 
     /// Display error messages
     pub fn error(&self, message: &str) {
-        eprintln!("   {} {}", 
-            "❌".red(),
-            message.red()
-        );
+        eprintln!("   {} {}", "❌".red(), message.red());
     }
 
     /// Display search results count
     #[allow(dead_code)]
     pub fn search_results(&self, count: usize, query: &str) {
         if count > 0 {
-            eprintln!("{} {} {}", 
+            eprintln!(
+                "{} {} {}",
                 "🔍".yellow(),
                 format!("Found {} thoughts", count).bright_yellow(),
                 format!("for: {}", query).yellow()
             );
         } else {
-            eprintln!("{} {}", 
+            eprintln!(
+                "{} {}",
                 "🔍".yellow(),
                 format!("No thoughts found for: {}", query).yellow()
             );
@@ -104,7 +107,8 @@ impl VisualOutput {
 
     /// Display thinking completion
     pub fn thinking_complete(&self) {
-        eprintln!("   {} {}", 
+        eprintln!(
+            "   {} {}",
             "🎯".bright_blue(),
             "Thinking complete".bright_blue()
         );
@@ -113,7 +117,8 @@ impl VisualOutput {
     /// Display next thought needed indicator
     pub fn next_thought_indicator(&self, next_needed: bool) {
         if next_needed {
-            eprintln!("   {} {}", 
+            eprintln!(
+                "   {} {}",
                 "➡️".bright_cyan(),
                 "Next thought needed...".bright_cyan()
             );
@@ -134,8 +139,9 @@ impl VisualOutput {
         let progress = (current as f32 / total as f32 * 20.0) as usize;
         let filled = "█".repeat(progress);
         let empty = "░".repeat(20 - progress);
-        
-        eprintln!("   {} [{}{}] {}/{}", 
+
+        eprintln!(
+            "   {} [{}{}] {}/{}",
             "📊".bright_blue(),
             filled.bright_blue(),
             empty.dimmed(),

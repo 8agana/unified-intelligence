@@ -8,10 +8,14 @@ use crate::repository::ThoughtRepository;
 /// Parameters for the ui_help tool
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UiHelpParams {
-    #[schemars(description = "Optional specific tool to get help for ('ui_think', 'ui_recall', or leave empty for general help)")]
+    #[schemars(
+        description = "Optional specific tool to get help for ('ui_think', 'ui_recall', or leave empty for general help)"
+    )]
     pub tool: Option<String>,
-    
-    #[schemars(description = "Optional specific topic ('frameworks', 'parameters', 'examples', or leave empty for all)")]
+
+    #[schemars(
+        description = "Optional specific topic ('frameworks', 'parameters', 'examples', or leave empty for all)"
+    )]
     pub topic: Option<String>,
 }
 
@@ -33,23 +37,25 @@ impl HelpHandler {
     pub fn new(instance_id: String) -> Self {
         Self { instance_id }
     }
-    
+
     pub async fn help(&self, params: UiHelpParams) -> Result<HelpResponse> {
-        tracing::info!("Processing help request for instance '{}'", self.instance_id);
-        
+        tracing::info!(
+            "Processing help request for instance '{}'",
+            self.instance_id
+        );
+
         let response = match params.tool.as_deref() {
             Some("ui_think") => self.ui_think_help(&params.topic),
             Some("ui_recall") => self.ui_recall_help(&params.topic),
             _ => self.general_help(),
         };
-        
+
         Ok(response)
     }
-    
+
     fn general_help(&self) -> HelpResponse {
         HelpResponse {
             overview: "UnifiedIntelligence MCP Server - A Redis-backed thought storage and retrieval system with thinking framework support.\n\nAvailable tools:\n• ui_think - Capture and process thoughts with optional chaining and framework support\n• ui_recall - Retrieve thoughts by ID or chain ID\n• ui_help - Get help information about the tools".to_string(),
-            
             tools: json!({
                 "ui_think": {
                     "description": "Capture and process thoughts with optional chaining support",
@@ -75,7 +81,6 @@ impl HelpHandler {
                     "purpose": "Learn how to use UnifiedIntelligence tools effectively"
                 }
             }),
-            
             examples: json!({
                 "basic_thought": {
                     "description": "Store a simple thought",
@@ -108,7 +113,6 @@ impl HelpHandler {
                     }
                 }
             }),
-            
             tips: vec![
                 "Use chain_id to link related thoughts together for better context".to_string(),
                 "Apply thinking frameworks to structure your analysis (ooda, socratic, first_principles, systems, root_cause, swot)".to_string(),
@@ -118,7 +122,7 @@ impl HelpHandler {
             ],
         }
     }
-    
+
     fn ui_think_help(&self, topic: &Option<String>) -> HelpResponse {
         let base_info = json!({
             "description": "Capture and process thoughts with optional chaining support",
@@ -137,7 +141,7 @@ impl HelpHandler {
                 "category": "Category: 'technical', 'strategic', 'operational', or 'relationship' (string)"
             }
         });
-        
+
         let frameworks = json!({
             "available_frameworks": {
                 "ooda": {
@@ -172,7 +176,7 @@ impl HelpHandler {
                 }
             }
         });
-        
+
         let examples = json!({
             "simple_thought": {
                 "params": {
@@ -207,7 +211,7 @@ impl HelpHandler {
                 }
             }
         });
-        
+
         HelpResponse {
             overview: "ui_think - Capture and process thoughts with advanced features for structured thinking".to_string(),
             tools: match topic.as_deref() {
@@ -230,7 +234,7 @@ impl HelpHandler {
             ],
         }
     }
-    
+
     fn ui_recall_help(&self, topic: &Option<String>) -> HelpResponse {
         let base_info = json!({
             "description": "Retrieve thoughts and memories by ID or chain ID",
@@ -249,7 +253,7 @@ impl HelpHandler {
                 }
             }
         });
-        
+
         let examples = json!({
             "recall_single_thought": {
                 "description": "Retrieve a specific thought",
@@ -266,16 +270,17 @@ impl HelpHandler {
                 }
             }
         });
-        
+
         HelpResponse {
-            overview: "ui_recall - Retrieve previously stored thoughts for context and analysis".to_string(),
+            overview: "ui_recall - Retrieve previously stored thoughts for context and analysis"
+                .to_string(),
             tools: match topic.as_deref() {
                 Some("parameters") => base_info,
                 Some("examples") => examples,
                 _ => json!({
                     "parameters": base_info,
                     "examples": examples
-                })
+                }),
             },
             examples: json!({}),
             tips: vec![

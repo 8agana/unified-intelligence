@@ -1,8 +1,6 @@
-
 /// Retry policy configuration
 #[derive(Debug, Clone)]
-pub struct RetryConfig {
-}
+pub struct RetryConfig {}
 
 impl Default for RetryConfig {
     fn default() -> Self {
@@ -27,5 +25,4 @@ impl Default for RetryPolicy {
 mod tests {
     use super::*;
     use tokio::test;
-    
 }

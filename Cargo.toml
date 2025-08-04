@@ -46,6 +46,7 @@ fuzzy-matcher = "0.3"
 # Additional utilities
 backoff = "0.4"
 rand = "0.8"
+dotenvy = "0.15"
 # pyo3 = { version = "0.21", features = ["auto-initialize", "extension-module"] }
 # pythonize = "0.21"
 
