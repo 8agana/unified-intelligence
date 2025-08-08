@@ -246,3 +246,326 @@ pub struct Choice {
 }
 
 // RecallMode enum and UiRecallParams moved to handlers/recall.rs with string-based mode
+
+// ========== KNOWLEDGE GRAPH MODELS ==========
+
+/// Scope for knowledge graph operations
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum KnowledgeScope {
+    Federation,  // Default for work-related entities
+    Personal,    // Instance-specific context
+}
+
+impl Default for KnowledgeScope {
+    fn default() -> Self {
+        Self::Federation
+    }
+}
+
+impl std::fmt::Display for KnowledgeScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Federation => write!(f, "Federation"),
+            Self::Personal => write!(f, "Personal"),
+        }
+    }
+}
+
+/// Entity types in the knowledge graph
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityType {
+    Issue,
+    Person,
+    System,
+    Concept,
+    Tool,
+    Framework,
+    Custom(String),
+}
+
+impl std::fmt::Display for EntityType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Issue => write!(f, "issue"),
+            Self::Person => write!(f, "person"),
+            Self::System => write!(f, "system"),
+            Self::Concept => write!(f, "concept"),
+            Self::Tool => write!(f, "tool"),
+            Self::Framework => write!(f, "framework"),
+            Self::Custom(s) => write!(f, "{}", s),
+        }
+    }
+}
+
+/// Node in the knowledge graph
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeNode {
+    pub id: String,
+    pub name: String,
+    pub display_name: String,
+    pub entity_type: EntityType,
+    pub scope: KnowledgeScope,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub created_by: String,
+    pub attributes: std::collections::HashMap<String, serde_json::Value>,
+    pub tags: Vec<String>,
+    pub thought_ids: Vec<String>,
+    pub embedding: Option<Vec<f32>>,
+    pub metadata: NodeMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeMetadata {
+    pub auto_extracted: bool,
+    pub extraction_source: Option<String>,
+    pub extraction_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Relationship between entities
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeRelation {
+    pub id: String,
+    pub from_entity_id: String,
+    pub to_entity_id: String,
+    pub relationship_type: String,
+    pub scope: KnowledgeScope,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub created_by: String,
+    pub attributes: std::collections::HashMap<String, serde_json::Value>,
+    pub metadata: RelationMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelationMetadata {
+    pub bidirectional: bool,
+    pub weight: f32,
+}
+
+/// Parameters for ui_knowledge tool - flattened structure for CC compatibility
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UiKnowledgeParams {
+    #[schemars(description = "Action to perform: create, search, set_active, get_entity, create_relation, get_relations, update_entity, delete_entity")]
+    pub action: String,
+    
+    // Create entity fields
+    #[schemars(description = "Name/identifier for the entity (create)")]
+    pub name: Option<String>,
+    #[schemars(description = "Human-readable display name (create/update)")]
+    pub display_name: Option<String>,
+    #[schemars(description = "Type of entity: person, system, tool, concept, framework, issue, custom (create/search)")]
+    pub entity_type: Option<String>,
+    
+    // Common fields
+    #[schemars(description = "Scope: 'federation' or 'personal' (all operations)")]
+    pub scope: Option<String>,
+    #[schemars(description = "Additional attributes as JSON object (create/update/create_relation)")]
+    pub attributes: Option<std::collections::HashMap<String, serde_json::Value>>,
+    #[schemars(description = "Tags for categorization (create/update)")]
+    pub tags: Option<Vec<String>>,
+    
+    // Search fields
+    #[schemars(description = "Search query (search)")]
+    pub query: Option<String>,
+    #[schemars(description = "Maximum results to return (search)")]
+    pub limit: Option<usize>,
+    
+    // Entity ID fields
+    #[schemars(description = "Entity ID (set_active/get_entity/get_relations/update_entity/delete_entity)")]
+    pub entity_id: Option<String>,
+    
+    // Relation fields
+    #[schemars(description = "Source entity ID (create_relation)")]
+    pub from_entity_id: Option<String>,
+    #[schemars(description = "Target entity ID (create_relation)")]
+    pub to_entity_id: Option<String>,
+    #[schemars(description = "Type of relationship (create_relation)")]
+    pub relationship_type: Option<String>,
+    #[schemars(description = "Whether the relationship is bidirectional (create_relation)")]
+    pub bidirectional: Option<bool>,
+    #[schemars(description = "Weight of the relationship 0.0-1.0 (create_relation)")]
+    pub weight: Option<f32>,
+}
+
+// Keep the enum for internal use (not exposed in schema)
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum UiKnowledgeOperation {
+    Create(CreateEntityParams),
+    Search(SearchParams),
+    SetActive(SetActiveParams),
+    GetEntity(GetEntityParams),
+    CreateRelation(CreateRelationParams),
+    GetRelations(GetRelationsParams),
+    UpdateEntity(UpdateEntityParams),
+    DeleteEntity(DeleteEntityParams),
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateEntityParams {
+    #[schemars(description = "Name/identifier for the entity")]
+    pub name: String,
+    
+    #[schemars(description = "Human-readable display name")]
+    pub display_name: Option<String>,
+    
+    #[schemars(description = "Type of entity")]
+    pub entity_type: EntityType,
+    
+    #[schemars(description = "Scope: 'federation' (default) or 'personal'")]
+    #[serde(default)]
+    pub scope: KnowledgeScope,
+    
+    #[schemars(description = "Additional attributes as JSON object")]
+    pub attributes: Option<std::collections::HashMap<String, serde_json::Value>>,
+    
+    #[schemars(description = "Tags for categorization")]
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SearchParams {
+    #[schemars(description = "Search query (name, tag, or attribute)")]
+    pub query: String,
+    
+    #[schemars(description = "Scope to search in")]
+    #[serde(default)]
+    pub scope: KnowledgeScope,
+    
+    #[schemars(description = "Filter by entity type")]
+    pub entity_type: Option<EntityType>,
+    
+    #[schemars(description = "Maximum results to return")]
+    #[serde(default = "default_kg_limit")]
+    pub limit: usize,
+}
+
+fn default_kg_limit() -> usize { 10 }
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetActiveParams {
+    #[schemars(description = "Entity ID to set as active context")]
+    pub entity_id: String,
+    
+    #[schemars(description = "Scope of the entity")]
+    #[serde(default)]
+    pub scope: KnowledgeScope,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetEntityParams {
+    #[schemars(description = "Entity ID to retrieve")]
+    pub entity_id: String,
+    
+    #[schemars(description = "Scope of the entity")]
+    #[serde(default)]
+    pub scope: KnowledgeScope,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateRelationParams {
+    #[schemars(description = "Source entity ID")]
+    pub from_entity_id: String,
+    
+    #[schemars(description = "Target entity ID")]
+    pub to_entity_id: String,
+    
+    #[schemars(description = "Type of relationship")]
+    pub relationship_type: String,
+    
+    #[schemars(description = "Scope of the relationship")]
+    #[serde(default)]
+    pub scope: KnowledgeScope,
+    
+    #[schemars(description = "Additional attributes for the relationship")]
+    pub attributes: Option<std::collections::HashMap<String, serde_json::Value>>,
+    
+    #[schemars(description = "Whether the relationship is bidirectional")]
+    #[serde(default)]
+    pub bidirectional: bool,
+    
+    #[schemars(description = "Weight of the relationship (0.0-1.0)")]
+    #[serde(default = "default_kg_weight")]
+    pub weight: f32,
+}
+
+fn default_kg_weight() -> f32 { 1.0 }
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetRelationsParams {
+    #[schemars(description = "Entity ID to get relations for")]
+    pub entity_id: String,
+    
+    #[schemars(description = "Scope of the entity")]
+    #[serde(default)]
+    pub scope: KnowledgeScope,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateEntityParams {
+    #[schemars(description = "Entity ID to update")]
+    pub entity_id: String,
+    
+    #[schemars(description = "Scope of the entity")]
+    #[serde(default)]
+    pub scope: KnowledgeScope,
+    
+    #[schemars(description = "Updated display name")]
+    pub display_name: Option<String>,
+    
+    #[schemars(description = "Updated attributes")]
+    pub attributes: Option<std::collections::HashMap<String, serde_json::Value>>,
+    
+    #[schemars(description = "Updated tags")]
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteEntityParams {
+    #[schemars(description = "Entity ID to delete")]
+    pub entity_id: String,
+    
+    #[schemars(description = "Scope of the entity")]
+    #[serde(default)]
+    pub scope: KnowledgeScope,
+}
+
+/// Response from knowledge operations
+#[derive(Debug, Serialize)]
+pub struct KnowledgeResponse {
+    pub status: String,
+    pub entity_id: Option<String>,
+    pub entities: Option<Vec<KnowledgeNode>>,
+    pub relations: Option<Vec<KnowledgeRelation>>,
+    pub message: Option<String>,
+}
+
+impl KnowledgeScope {
+    /// Determine appropriate scope based on context
+    pub fn from_context(entity_type: &EntityType, instance: &str) -> Self {
+        match entity_type {
+            EntityType::Issue | EntityType::System | EntityType::Tool => {
+                // Work-related entities default to Federation
+                Self::Federation
+            }
+            EntityType::Person => {
+                // Check if it's a known team member
+                if ["Sam", "CC", "DT", "Gem"].contains(&instance) {
+                    Self::Federation
+                } else {
+                    Self::Personal
+                }
+            }
+            EntityType::Concept | EntityType::Framework => {
+                // Technical concepts are Federation, personal notes are Personal
+                Self::Federation
+            }
+            EntityType::Custom(_) => {
+                // Custom entities default to Personal
+                Self::Personal
+            }
+        }
+    }
+}

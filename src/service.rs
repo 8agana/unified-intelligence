@@ -11,20 +11,23 @@ use tracing;
 use crate::config::Config;
 use crate::error::UnifiedIntelligenceError;
 use crate::handlers::help::{HelpHandlerTrait, UiHelpParams};
+use crate::handlers::knowledge::KnowledgeHandler;
 use crate::handlers::recall::UiRecallParams;
-use crate::handlers::{ToolHandlers, thoughts::ThoughtsHandler};
+use crate::handlers::thoughts::ThoughtsHandler;
+use crate::handlers::ToolHandlers;
 use crate::models::UiThinkParams;
+use crate::models::UiKnowledgeParams;
 use crate::qdrant_service::QdrantService;
 use crate::rate_limit::RateLimiter;
 use crate::redis::RedisManager;
-use crate::repository::RedisThoughtRepository;
+use crate::repository::CombinedRedisRepository;
 use crate::validation::InputValidator;
 
 /// Main service struct for UnifiedIntelligence MCP server
 #[derive(Clone)]
 pub struct UnifiedIntelligenceService {
     tool_router: ToolRouter<Self>,
-    handlers: Arc<ToolHandlers<RedisThoughtRepository>>,
+    handlers: Arc<ToolHandlers<CombinedRedisRepository>>,
     rate_limiter: Arc<RateLimiter>,
     instance_id: String,
     config: Arc<Config>,
@@ -64,13 +67,13 @@ impl UnifiedIntelligenceService {
         tracing::info!("Service::new() - Event stream initialized");
 
         // Create repository with config and instance_id
-        tracing::info!("Service::new() - Creating RedisThoughtRepository");
-        let repository = Arc::new(RedisThoughtRepository::new(
+        tracing::info!("Service::new() - Creating CombinedRedisRepository");
+        let repository = Arc::new(CombinedRedisRepository::new(
             redis_manager.clone(),
             config.clone(),
             instance_id.clone(),
         ));
-        tracing::info!("Service::new() - RedisThoughtRepository created");
+        tracing::info!("Service::new() - CombinedRedisRepository created");
 
         // Create validator
         tracing::info!("Service::new() - Creating InputValidator");
@@ -195,6 +198,34 @@ impl UnifiedIntelligenceService {
                     format!("Error generating help: {}", e),
                     None,
                 ))
+            }
+        }
+    }
+
+    #[tool(description = "Manage knowledge graph entities and relationships")]
+    pub async fn ui_knowledge(
+        &self,
+        params: Parameters<UiKnowledgeParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
+            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
+            return Err(ErrorData::invalid_params(
+                format!("Rate limit exceeded. Please slow down your requests."),
+                None,
+            ));
+        }
+
+        match self.handlers.ui_knowledge(params.0).await {
+            Ok(response) => {
+                let content = Content::json(response).map_err(|e| {
+                    ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None)
+                })?;
+                Ok(CallToolResult::success(vec![content]))
+            }
+            Err(e) => {
+                tracing::error!("ui_knowledge error: {}", e);
+                Err(ErrorData::internal_error(e.to_string(), None))
             }
         }
     }

@@ -1,4 +1,5 @@
 pub mod help;
+pub mod knowledge;
 pub mod recall;
 /// Handler modules for UnifiedIntelligence MCP tools
 pub mod thoughts;
@@ -6,17 +7,17 @@ pub mod thoughts;
 use crate::config::Config;
 use crate::qdrant_service::QdrantService;
 use crate::redis::RedisManager;
-use crate::repository::ThoughtRepository;
+use crate::repository_traits::{ThoughtRepository, KnowledgeRepository};
 use crate::validation::InputValidator;
 use crate::visual::VisualOutput;
 use std::sync::Arc;
 
 // Re-export handler traits from submodules
-pub use help::{HelpHandler, HelpHandlerTrait, UiHelpParams};
+pub use help::HelpHandler;
 pub use recall::RecallHandler;
 
 /// Handler for MCP tool operations
-pub struct ToolHandlers<R: ThoughtRepository> {
+pub struct ToolHandlers<R: ThoughtRepository + KnowledgeRepository> {
     pub(crate) repository: Arc<R>,
     pub(crate) instance_id: String,
     pub(crate) validator: Arc<InputValidator>,
@@ -28,7 +29,7 @@ pub struct ToolHandlers<R: ThoughtRepository> {
     pub(crate) config: Arc<Config>,
 }
 
-impl<R: ThoughtRepository> ToolHandlers<R> {
+impl<R: ThoughtRepository + KnowledgeRepository> ToolHandlers<R> {
     pub fn new(
         repository: Arc<R>,
         instance_id: String,
