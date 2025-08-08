@@ -43,6 +43,9 @@ pub enum UnifiedIntelligenceError {
     #[error("Internal error: {0}")]
     Internal(String),
 
+    #[error("Not found: {0}")]
+    NotFound(String),
+
     #[error("Environment variable error: {0}")]
     EnvVar(String),
 

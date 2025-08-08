@@ -246,3 +246,182 @@ pub struct Choice {
 }
 
 // RecallMode enum and UiRecallParams moved to handlers/recall.rs with string-based mode
+
+// ========== KNOWLEDGE GRAPH MODELS ==========
+
+/// Scope for knowledge graph operations
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum KnowledgeScope {
+    Federation,  // Default for work-related entities
+    Personal,    // Instance-specific context
+}
+
+impl Default for KnowledgeScope {
+    fn default() -> Self {
+        Self::Federation
+    }
+}
+
+impl std::fmt::Display for KnowledgeScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Federation => write!(f, "Federation"),
+            Self::Personal => write!(f, "Personal"),
+        }
+    }
+}
+
+/// Entity types in the knowledge graph
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityType {
+    Issue,
+    Person,
+    System,
+    Concept,
+    Tool,
+    Framework,
+    Custom(String),
+}
+
+impl std::fmt::Display for EntityType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Issue => write!(f, "issue"),
+            Self::Person => write!(f, "person"),
+            Self::System => write!(f, "system"),
+            Self::Concept => write!(f, "concept"),
+            Self::Tool => write!(f, "tool"),
+            Self::Framework => write!(f, "framework"),
+            Self::Custom(s) => write!(f, "{}", s),
+        }
+    }
+}
+
+/// Node in the knowledge graph
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeNode {
+    pub id: String,
+    pub name: String,
+    pub display_name: String,
+    pub entity_type: EntityType,
+    pub scope: KnowledgeScope,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub created_by: String,
+    pub attributes: std::collections::HashMap<String, serde_json::Value>,
+    pub tags: Vec<String>,
+    pub thought_ids: Vec<String>,
+    pub embedding: Option<Vec<f32>>,
+    pub metadata: NodeMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeMetadata {
+    pub auto_extracted: bool,
+    pub extraction_source: Option<String>,
+    pub extraction_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Relationship between entities
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeRelation {
+    pub id: String,
+    pub from_entity_id: String,
+    pub to_entity_id: String,
+    pub relationship_type: String,
+    pub scope: KnowledgeScope,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub created_by: String,
+    pub attributes: std::collections::HashMap<String, serde_json::Value>,
+    pub metadata: RelationMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelationMetadata {
+    pub bidirectional: bool,
+    pub weight: f32,
+}
+
+/// Parameters for ui_knowledge tool - flattened structure for CC compatibility
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UiKnowledgeParams {
+    #[schemars(description = "Operation mode: create, search, set_active, get_entity, create_relation, get_relations, update_entity, delete_entity", regex(pattern = r"^(create|search|set_active|get_entity|create_relation|get_relations|update_entity|delete_entity)$"))]
+    pub mode: String,
+    
+    // Common fields
+    #[serde(default)]
+    pub entity_id: Option<String>,
+    #[serde(default)]
+    pub scope: Option<KnowledgeScope>,
+    
+    // For create/update
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub entity_type: Option<EntityType>,
+    #[serde(default)]
+    pub attributes: Option<std::collections::HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    
+    // For search
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    
+    // For relations
+    #[serde(default)]
+    pub from_entity_id: Option<String>,
+    #[serde(default)]
+    pub to_entity_id: Option<String>,
+    #[serde(default)]
+    pub relationship_type: Option<String>,
+    #[serde(default)]
+    pub bidirectional: Option<bool>,
+    #[serde(default)]
+    pub weight: Option<f32>,
+}
+
+
+/// Response from knowledge operations
+#[derive(Debug, Serialize)]
+pub struct KnowledgeResponse {
+    pub status: String,
+    pub entity_id: Option<String>,
+    pub entities: Option<Vec<KnowledgeNode>>,
+    pub relations: Option<Vec<KnowledgeRelation>>,
+    pub message: Option<String>,
+}
+
+impl KnowledgeScope {
+    /// Determine appropriate scope based on context
+    pub fn from_context(entity_type: &EntityType, instance: &str) -> Self {
+        match entity_type {
+            EntityType::Issue | EntityType::System | EntityType::Tool => {
+                // Work-related entities default to Federation
+                Self::Federation
+            }
+            EntityType::Person => {
+                // Check if it's a known team member
+                if ["Sam", "CC", "DT", "Gem"].contains(&instance) {
+                    Self::Federation
+                } else {
+                    Self::Personal
+                }
+            }
+            EntityType::Concept | EntityType::Framework => {
+                // Technical concepts are Federation, personal notes are Personal
+                Self::Federation
+            }
+            EntityType::Custom(_) => {
+                // Custom entities default to Personal
+                Self::Personal
+            }
+        }
+    }
+}

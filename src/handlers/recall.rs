@@ -1,4 +1,4 @@
-use crate::repository::ThoughtRepository;
+use crate::repository_traits::{ThoughtRepository, KnowledgeRepository};
 use rmcp::model::{CallToolResult, Content, ErrorData};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ pub struct RecallHandler<R: ThoughtRepository> {
     instance_id: String,
 }
 
-impl<R: ThoughtRepository> RecallHandler<R> {
+impl<R: ThoughtRepository + KnowledgeRepository> RecallHandler<R> {
     pub fn new(repository: Arc<R>, instance_id: String) -> Self {
         Self {
             repository,

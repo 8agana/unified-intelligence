@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing;
 
-use crate::error::{Result, UnifiedIntelligenceError};
-use crate::repository::ThoughtRepository;
+use crate::error::Result;
+use crate::repository_traits::{ThoughtRepository, KnowledgeRepository};
 
 /// Parameters for the ui_help tool
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -299,7 +299,7 @@ pub trait HelpHandlerTrait {
     async fn ui_help(&self, params: UiHelpParams) -> Result<HelpResponse>;
 }
 
-impl<R: ThoughtRepository> HelpHandlerTrait for super::ToolHandlers<R> {
+impl<R: ThoughtRepository + KnowledgeRepository> HelpHandlerTrait for super::ToolHandlers<R> {
     async fn ui_help(&self, params: UiHelpParams) -> Result<HelpResponse> {
         self.help.help(params).await
     }

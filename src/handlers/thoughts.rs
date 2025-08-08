@@ -1,15 +1,12 @@
-use serde_json::json;
 use std::env;
 use std::sync::Arc;
 use tracing;
-
-use crate::config::Config;
 use crate::embeddings::generate_openai_embedding;
 use crate::error::{Result, UnifiedIntelligenceError};
 use crate::frameworks::{FrameworkProcessor, FrameworkVisual, ThinkingFramework};
 use crate::intent::{GroqIntent, IntentParser};
 use crate::models::{ChainMetadata, ThinkResponse, ThoughtRecord, UiThinkParams};
-use crate::repository::ThoughtRepository;
+use crate::repository_traits::{ThoughtRepository, KnowledgeRepository};
 use crate::synth::{GroqSynth, Synthesizer};
 use crate::transport::{GroqTransport, Transport};
 
@@ -19,7 +16,7 @@ pub trait ThoughtsHandler {
     async fn ui_think(&self, params: UiThinkParams) -> Result<ThinkResponse>;
 }
 
-impl<R: ThoughtRepository> ThoughtsHandler for super::ToolHandlers<R> {
+impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::ToolHandlers<R> {
     /// Handle ui_think tool
     async fn ui_think(&self, params: UiThinkParams) -> Result<ThinkResponse> {
         // Determine framework with graceful fallback to Socratic on invalid
