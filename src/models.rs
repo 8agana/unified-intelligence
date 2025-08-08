@@ -347,190 +347,46 @@ pub struct RelationMetadata {
 /// Parameters for ui_knowledge tool - flattened structure for CC compatibility
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UiKnowledgeParams {
-    #[schemars(description = "Action to perform: create, search, set_active, get_entity, create_relation, get_relations, update_entity, delete_entity")]
-    pub action: String,
-    
-    // Create entity fields
-    #[schemars(description = "Name/identifier for the entity (create)")]
-    pub name: Option<String>,
-    #[schemars(description = "Human-readable display name (create/update)")]
-    pub display_name: Option<String>,
-    #[schemars(description = "Type of entity: person, system, tool, concept, framework, issue, custom (create/search)")]
-    pub entity_type: Option<String>,
+    #[schemars(description = "Operation mode: create, search, set_active, get_entity, create_relation, get_relations, update_entity, delete_entity", regex(pattern = r"^(create|search|set_active|get_entity|create_relation|get_relations|update_entity|delete_entity)$"))]
+    pub mode: String,
     
     // Common fields
-    #[schemars(description = "Scope: 'federation' or 'personal' (all operations)")]
-    pub scope: Option<String>,
-    #[schemars(description = "Additional attributes as JSON object (create/update/create_relation)")]
+    #[serde(default)]
+    pub entity_id: Option<String>,
+    #[serde(default)]
+    pub scope: Option<KnowledgeScope>,
+    
+    // For create/update
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub entity_type: Option<EntityType>,
+    #[serde(default)]
     pub attributes: Option<std::collections::HashMap<String, serde_json::Value>>,
-    #[schemars(description = "Tags for categorization (create/update)")]
+    #[serde(default)]
     pub tags: Option<Vec<String>>,
     
-    // Search fields
-    #[schemars(description = "Search query (search)")]
+    // For search
+    #[serde(default)]
     pub query: Option<String>,
-    #[schemars(description = "Maximum results to return (search)")]
+    #[serde(default)]
     pub limit: Option<usize>,
     
-    // Entity ID fields
-    #[schemars(description = "Entity ID (set_active/get_entity/get_relations/update_entity/delete_entity)")]
-    pub entity_id: Option<String>,
-    
-    // Relation fields
-    #[schemars(description = "Source entity ID (create_relation)")]
+    // For relations
+    #[serde(default)]
     pub from_entity_id: Option<String>,
-    #[schemars(description = "Target entity ID (create_relation)")]
+    #[serde(default)]
     pub to_entity_id: Option<String>,
-    #[schemars(description = "Type of relationship (create_relation)")]
+    #[serde(default)]
     pub relationship_type: Option<String>,
-    #[schemars(description = "Whether the relationship is bidirectional (create_relation)")]
+    #[serde(default)]
     pub bidirectional: Option<bool>,
-    #[schemars(description = "Weight of the relationship 0.0-1.0 (create_relation)")]
+    #[serde(default)]
     pub weight: Option<f32>,
 }
 
-// Keep the enum for internal use (not exposed in schema)
-#[derive(Debug, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub enum UiKnowledgeOperation {
-    Create(CreateEntityParams),
-    Search(SearchParams),
-    SetActive(SetActiveParams),
-    GetEntity(GetEntityParams),
-    CreateRelation(CreateRelationParams),
-    GetRelations(GetRelationsParams),
-    UpdateEntity(UpdateEntityParams),
-    DeleteEntity(DeleteEntityParams),
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CreateEntityParams {
-    #[schemars(description = "Name/identifier for the entity")]
-    pub name: String,
-    
-    #[schemars(description = "Human-readable display name")]
-    pub display_name: Option<String>,
-    
-    #[schemars(description = "Type of entity")]
-    pub entity_type: EntityType,
-    
-    #[schemars(description = "Scope: 'federation' (default) or 'personal'")]
-    #[serde(default)]
-    pub scope: KnowledgeScope,
-    
-    #[schemars(description = "Additional attributes as JSON object")]
-    pub attributes: Option<std::collections::HashMap<String, serde_json::Value>>,
-    
-    #[schemars(description = "Tags for categorization")]
-    pub tags: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SearchParams {
-    #[schemars(description = "Search query (name, tag, or attribute)")]
-    pub query: String,
-    
-    #[schemars(description = "Scope to search in")]
-    #[serde(default)]
-    pub scope: KnowledgeScope,
-    
-    #[schemars(description = "Filter by entity type")]
-    pub entity_type: Option<EntityType>,
-    
-    #[schemars(description = "Maximum results to return")]
-    #[serde(default = "default_kg_limit")]
-    pub limit: usize,
-}
-
-fn default_kg_limit() -> usize { 10 }
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SetActiveParams {
-    #[schemars(description = "Entity ID to set as active context")]
-    pub entity_id: String,
-    
-    #[schemars(description = "Scope of the entity")]
-    #[serde(default)]
-    pub scope: KnowledgeScope,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct GetEntityParams {
-    #[schemars(description = "Entity ID to retrieve")]
-    pub entity_id: String,
-    
-    #[schemars(description = "Scope of the entity")]
-    #[serde(default)]
-    pub scope: KnowledgeScope,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CreateRelationParams {
-    #[schemars(description = "Source entity ID")]
-    pub from_entity_id: String,
-    
-    #[schemars(description = "Target entity ID")]
-    pub to_entity_id: String,
-    
-    #[schemars(description = "Type of relationship")]
-    pub relationship_type: String,
-    
-    #[schemars(description = "Scope of the relationship")]
-    #[serde(default)]
-    pub scope: KnowledgeScope,
-    
-    #[schemars(description = "Additional attributes for the relationship")]
-    pub attributes: Option<std::collections::HashMap<String, serde_json::Value>>,
-    
-    #[schemars(description = "Whether the relationship is bidirectional")]
-    #[serde(default)]
-    pub bidirectional: bool,
-    
-    #[schemars(description = "Weight of the relationship (0.0-1.0)")]
-    #[serde(default = "default_kg_weight")]
-    pub weight: f32,
-}
-
-fn default_kg_weight() -> f32 { 1.0 }
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct GetRelationsParams {
-    #[schemars(description = "Entity ID to get relations for")]
-    pub entity_id: String,
-    
-    #[schemars(description = "Scope of the entity")]
-    #[serde(default)]
-    pub scope: KnowledgeScope,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct UpdateEntityParams {
-    #[schemars(description = "Entity ID to update")]
-    pub entity_id: String,
-    
-    #[schemars(description = "Scope of the entity")]
-    #[serde(default)]
-    pub scope: KnowledgeScope,
-    
-    #[schemars(description = "Updated display name")]
-    pub display_name: Option<String>,
-    
-    #[schemars(description = "Updated attributes")]
-    pub attributes: Option<std::collections::HashMap<String, serde_json::Value>>,
-    
-    #[schemars(description = "Updated tags")]
-    pub tags: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct DeleteEntityParams {
-    #[schemars(description = "Entity ID to delete")]
-    pub entity_id: String,
-    
-    #[schemars(description = "Scope of the entity")]
-    #[serde(default)]
-    pub scope: KnowledgeScope,
-}
 
 /// Response from knowledge operations
 #[derive(Debug, Serialize)]
