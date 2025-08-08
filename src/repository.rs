@@ -227,10 +227,11 @@ pub struct RedisKnowledgeRepository {
     redis_manager: Arc<RedisManager>,
     // Atomic script for entity creation + index update
     create_entity_script: Script,
+    instance_id: String,
 }
 
 impl RedisKnowledgeRepository {
-    pub fn new(redis_manager: Arc<RedisManager>) -> Self {
+    pub fn new(redis_manager: Arc<RedisManager>, instance_id: String) -> Self {
         // Lua script for atomic entity creation + index update
         let create_entity_script = Script::new(r#"
             local entity_key = KEYS[1]
@@ -248,25 +249,41 @@ impl RedisKnowledgeRepository {
             return 'OK'
         "#);
         
-        Self { redis_manager, create_entity_script }
+        Self { redis_manager, create_entity_script, instance_id }
     }
     
     // Use Display trait instead of Debug format for keys
     fn get_entity_key(&self, id: &str, scope: &KnowledgeScope) -> String {
-        format!("{}:KG:entity:{}", scope, id)
+        let prefix = match scope {
+            KnowledgeScope::Personal => &self.instance_id,
+            _ => &scope.to_string(),
+        };
+        format!("{}:KG:entity:{}", prefix, id)
     }
     
     fn get_relation_key(&self, id: &str, scope: &KnowledgeScope) -> String {
-        format!("{}:KG:relation:{}", scope, id)
+        let prefix = match scope {
+            KnowledgeScope::Personal => &self.instance_id,
+            _ => &scope.to_string(),
+        };
+        format!("{}:KG:relation:{}", prefix, id)
     }
     
     // Use Redis Hash for name index
     fn get_index_key(&self, scope: &KnowledgeScope) -> String {
-        format!("{}:KG:index:name_to_id", scope)
+        let prefix = match scope {
+            KnowledgeScope::Personal => &self.instance_id,
+            _ => &scope.to_string(),
+        };
+        format!("{}:KG:index:name_to_id", prefix)
     }
     
     fn get_relation_index_key(&self, entity_id: &str, scope: &KnowledgeScope) -> String {
-        format!("{}:KG:index:entity_relations:{}", scope, entity_id)
+        let prefix = match scope {
+            KnowledgeScope::Personal => &self.instance_id,
+            _ => &scope.to_string(),
+        };
+        format!("{}:KG:index:entity_relations:{}", prefix, entity_id)
     }
     
     // SCAN-based search as fallback (non-blocking)
@@ -278,7 +295,11 @@ impl RedisKnowledgeRepository {
         limit: usize
     ) -> Result<Vec<KnowledgeNode>> {
         let mut conn = self.redis_manager.get_connection().await?;
-        let pattern = format!("{}:KG:entity:*", scope);
+        let prefix = match scope {
+            KnowledgeScope::Personal => &self.instance_id,
+            _ => &scope.to_string(),
+        };
+        let pattern = format!("{}:KG:entity:*", prefix);
         let mut cursor = 0u64;
         let mut results = Vec::new();
         
@@ -582,8 +603,8 @@ pub struct CombinedRedisRepository {
 
 impl CombinedRedisRepository {
     pub fn new(redis_manager: Arc<RedisManager>, config: Arc<Config>, instance_id: String) -> Self {
-        let thought_repo = RedisThoughtRepository::new(redis_manager.clone(), config, instance_id);
-        let knowledge_repo = RedisKnowledgeRepository::new(redis_manager);
+        let thought_repo = RedisThoughtRepository::new(redis_manager.clone(), config, instance_id.clone());
+        let knowledge_repo = RedisKnowledgeRepository::new(redis_manager, instance_id);
         
         Self {
             thought_repo,
