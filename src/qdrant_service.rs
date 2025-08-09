@@ -13,6 +13,20 @@ use uuid::Uuid;
 use crate::error::UnifiedIntelligenceError;
 use crate::models::Thought; // Assuming Thought struct is in crate::models
 
+#[cfg(test)]
+use mockall::automock;
+
+#[cfg_attr(test, automock)]
+pub trait QdrantServiceTrait: Send + Sync + 'static {
+    fn search_memories(
+        &self,
+        query_embedding: Vec<f32>,
+        top_k: u64,
+        score_threshold: Option<f32>,
+        temporal_filter: Option<crate::models::TemporalFilter>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<Thought>>> + Send>>;
+}
+
 #[derive(Clone)]
 pub struct QdrantService {
     client: Qdrant,
@@ -42,7 +56,7 @@ impl QdrantService {
         Ok(Self { client })
     }
 
-    pub async fn search_memories(
+    fn search_memories_internal(
         &self,
         query_embedding: Vec<f32>,
         top_k: u64,
@@ -399,6 +413,18 @@ impl QdrantService {
             usage_score: None,                    // Will be calculated later if needed
             combined_score: None,                 // Will be calculated later if needed
         })
+    }
+}
+
+impl QdrantServiceTrait for QdrantService {
+    fn search_memories(
+        &self,
+        query_embedding: Vec<f32>,
+        top_k: u64,
+        score_threshold: Option<f32>,
+        temporal_filter: Option<crate::models::TemporalFilter>,
+    ) -> impl std::future::Future<Output = Result<Vec<Thought>>> + Send {
+        self.search_memories_internal(query_embedding, top_k, score_threshold, temporal_filter)
     }
 }
 

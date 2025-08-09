@@ -46,10 +46,14 @@ Unified Intelligence is built with and integrates the following key technologies
 - **`tracing`:** For structured logging and observability.
 - **`colored`:** For enhanced terminal output.
 
+### Version Compatibility
+- **`rmcp` Version:** This project now uses `rmcp` version `0.5.0`.
+- **Protocol Version:** Supports protocol version `2024-11-05`.
+
 ## Getting Started
 
 ### Prerequisites
-- Rust (latest stable version, 2024 edition)
+- Rust (1.88.0 or later)
 - Cargo (Rust's package manager)
 - Docker (for running Redis and Qdrant)
 - Groq API Key (set as `GROQ_API_KEY` environment variable)

@@ -19,7 +19,7 @@ qdrant:
   port: 6334
   timeout_seconds: 30
   collection_name: unified_thoughts
-  similarity_threshold: 0.7
+  similarity_threshold: 0.35
 
 rate_limiter:
   max_requests: 100

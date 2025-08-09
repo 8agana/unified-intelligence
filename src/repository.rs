@@ -54,7 +54,7 @@ impl ThoughtRepository for RedisThoughtRepository {
             .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?;
 
         // Parse timestamp from ISO string to epoch seconds
-        let timestamp = chrono::DateTime::parse_from_rfc3339(&thought.timestamp)
+        let _timestamp = chrono::DateTime::parse_from_rfc3339(&thought.timestamp)
             .map(|dt| dt.timestamp())
             .unwrap_or_else(|_| {
                 // Fallback to current time if parsing fails
@@ -74,7 +74,7 @@ impl ThoughtRepository for RedisThoughtRepository {
                 chain_key.as_deref(),
                 &thought_json,
                 &thought.id,
-                timestamp,
+                _timestamp,
                 thought.chain_id.as_deref(),
             )
             .await?;
@@ -86,16 +86,6 @@ impl ThoughtRepository for RedisThoughtRepository {
                 preview,
             });
         } else {
-            // Publish thought_created event to Redis Streams for background processing
-            let timestamp = chrono::DateTime::parse_from_rfc3339(&thought.timestamp)
-                .map(|dt| dt.timestamp())
-                .unwrap_or_else(|_| {
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
-                        .as_secs() as i64
-                });
-
             // Publish to Redis Streams for background service
             let event_data = serde_json::to_value(thought)
                 .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?;

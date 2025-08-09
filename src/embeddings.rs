@@ -10,22 +10,6 @@ use tracing::{info, warn};
 use crate::error::UnifiedIntelligenceError;
 use crate::redis::RedisManager;
 
-#[derive(Debug, Serialize)]
-struct OpenAIEmbeddingRequest {
-    input: String,
-    model: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAIEmbeddingResponse {
-    data: Vec<OpenAIEmbedding>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAIEmbedding {
-    embedding: Vec<f32>,
-}
-
 pub async fn generate_openai_embedding(
     text: &str,
     openai_api_key: &str,

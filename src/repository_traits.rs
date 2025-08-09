@@ -2,7 +2,11 @@ use crate::error::Result;
 use crate::models::{ChainMetadata, ThoughtRecord, KnowledgeNode, KnowledgeRelation, KnowledgeScope, EntityType};
 use async_trait::async_trait;
 
+#[cfg(test)]
+use mockall::automock;
+
 #[async_trait]
+#[cfg_attr(test, automock)]
 pub trait ThoughtRepository: Send + Sync + 'static {
     async fn save_thought(&self, thought: &ThoughtRecord) -> Result<()>;
     async fn save_chain_metadata(&self, metadata: &ChainMetadata) -> Result<()>;
@@ -23,6 +27,7 @@ pub trait ThoughtRepository: Send + Sync + 'static {
 }
 
 #[async_trait]
+#[cfg_attr(test, automock)]
 pub trait KnowledgeRepository: Send + Sync + 'static {
     async fn create_entity(&self, node: KnowledgeNode) -> Result<()>;
     async fn get_entity(&self, id: &str, scope: &KnowledgeScope) -> Result<KnowledgeNode>;
