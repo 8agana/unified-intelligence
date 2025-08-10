@@ -295,6 +295,37 @@ impl UnifiedIntelligenceService {
             ));
         }
 
+        // Standardized help for ui_context
+        if params.0.kind.eq_ignore_ascii_case("help") {
+            let help = serde_json::json!({
+                "tool": "ui_context",
+                "usage": {
+                    "type": "session-summaries|important|federation|help",
+                    "content?": "string (required unless type=help)",
+                    "tags?": "string[]",
+                    "importance?": "string",
+                    "chain_id?": "string",
+                    "thought_id?": "string",
+                    "instance_id?": "string",
+                    "ttl_seconds?": "number"
+                },
+                "examples": [
+                    {"type": "session-summaries", "content": "..."},
+                    {"type": "important", "content": "...", "tags": ["project", "priority"]},
+                    {"type": "help"}
+                ],
+                "troubleshooting": [
+                    "Ensure RediSearch indices are created or allow tool to create them",
+                    "OPENAI_API_KEY must be set for embeddings",
+                    "INSTANCE_ID controls personal index namespace"
+                ]
+            });
+            let content = Content::json(help).map_err(|e| {
+                ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+            })?;
+            return Ok(CallToolResult::success(vec![content]));
+        }
+
         let result = ui_context_impl(&self.config, &self.handlers.redis_manager, params.0)
             .await
             .map_err(|e| {
@@ -320,6 +351,36 @@ impl UnifiedIntelligenceService {
                 "Rate limit exceeded. Please slow down your requests.".to_string(),
                 None,
             ));
+        }
+
+        // Standardized help for ui_memory
+        if params.0.action.eq_ignore_ascii_case("help") {
+            let help = serde_json::json!({
+                "tool": "ui_memory",
+                "usage": {
+                    "action": "search|read|update|delete|help",
+                    "query?": "string",
+                    "scope?": "all|session-summaries|important|federation",
+                    "filters?": {"tags?": "string[]", "importance?": "string", "chain_id?": "string", "thought_id?": "string"},
+                    "options?": {"limit?": "number", "offset?": "number", "k?": "number", "search_type?": "string"},
+                    "targets?": {"keys?": "string[]"},
+                    "update?": {"content?": "string", "tags?": "string[]", "importance?": "string", "chain_id?": "string", "thought_id?": "string", "ttl_seconds?": "number"}
+                },
+                "examples": [
+                    {"action": "search", "query": "vector db", "scope": "all"},
+                    {"action": "read", "targets": {"keys": ["CC:embeddings:important:abc123"]}},
+                    {"action": "help"}
+                ],
+                "troubleshooting": [
+                    "UTF-8 errors: avoids binary 'vector' field using HMGET for text fields",
+                    "Empty results: confirm indices and scope",
+                    "Set OPENAI_API_KEY for re-embedding on update"
+                ]
+            });
+            let content = Content::json(help).map_err(|e| {
+                ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+            })?;
+            return Ok(CallToolResult::success(vec![content]));
         }
 
         match ui_memory_impl(&self.config, &self.handlers.redis_manager, params.0).await {
