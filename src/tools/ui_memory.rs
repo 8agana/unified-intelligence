@@ -185,14 +185,70 @@ pub async fn ui_memory_impl(
 
     match params.action.as_str() {
         "search" => {
-            // Placeholder MVP: return a message until full search implementation is finalized.
+            // Keyword-only search MVP with filters. Uses RediSearch to get ids, then HGET fields.
+            let instance_id = std::env::var("INSTANCE_ID")
+                .unwrap_or_else(|_| config.server.default_instance_id.clone());
             let scope = params.scope.as_deref().unwrap_or("all");
-            Ok(UiMemoryResult {
-                message: Some(format!(
-                    "ui_memory search in scope '{scope}' not implemented yet"
-                )),
-                ..Default::default()
-            })
+            let indexes = determine_indexes(&instance_id, scope);
+            let options = params.options.clone().unwrap_or_default();
+
+            let mut query = String::new();
+            if let Some(q) = params.query.as_deref() {
+                if !q.trim().is_empty() {
+                    query.push_str(q.trim());
+                }
+            }
+            if let Some(f) = params.filters.as_ref() {
+                if !f.tags.is_empty() {
+                    if !query.is_empty() { query.push(' '); }
+                    let tags = f.tags.join("|");
+                    query.push_str(&format!("@tags:{{{tags}}}"));
+                }
+                if let Some(imp) = &f.importance {
+                    if !query.is_empty() { query.push(' '); }
+                    query.push_str(&format!("@importance:{imp}"));
+                }
+                if let Some(cid) = &f.chain_id {
+                    if !query.is_empty() { query.push(' '); }
+                    query.push_str(&format!("@chain_id:{cid}"));
+                }
+                if let Some(tid) = &f.thought_id {
+                    if !query.is_empty() { query.push(' '); }
+                    query.push_str(&format!("@thought_id:{tid}"));
+                }
+            }
+            if query.is_empty() { query.push('*'); }
+
+            let mut all_items: Vec<MemoryItem> = Vec::new();
+            for idx in indexes {
+                let res: redis::Value = redis::cmd("FT.SEARCH")
+                    .arg(&idx)
+                    .arg(&query)
+                    .arg("NOCONTENT")
+                    .arg("LIMIT").arg(options.offset).arg(options.limit)
+                    .query_async(&mut *con)
+                    .await?;
+                let keys = extract_doc_ids(&res);
+                if keys.is_empty() { continue; }
+
+                let mut pipe = redis::pipe();
+                for k in &keys { pipe.hgetall(k); }
+                let maps: Vec<HashMap<String, String>> = pipe.query_async(&mut *con).await?;
+                for (i, m) in maps.into_iter().enumerate() {
+                    if m.is_empty() { continue; }
+                    all_items.push(MemoryItem{
+                        key: keys[i].clone(),
+                        content: m.get("content").cloned().unwrap_or_default(),
+                        tags: m.get("tags").map(|s| s.split(',').map(|x| x.to_string()).collect()).unwrap_or_default(),
+                        importance: m.get("importance").cloned().unwrap_or_default(),
+                        chain_id: m.get("chain_id").cloned().unwrap_or_default(),
+                        thought_id: m.get("thought_id").cloned().unwrap_or_default(),
+                        ts: m.get("ts").and_then(|s| s.parse().ok()).unwrap_or_default(),
+                        score: None,
+                    });
+                }
+            }
+            Ok(UiMemoryResult { results: Some(all_items), ..Default::default() })
         }
         "read" => {
             let keys = params.targets.context("Missing targets for read")?.keys;
@@ -331,4 +387,26 @@ pub async fn ui_memory_impl(
             ..Default::default()
         }),
     }
+}
+
+fn extract_doc_ids(val: &redis::Value) -> Vec<String> {
+    // RediSearch NOCONTENT response (RESP3): [total(Int), id1(BulkString), id2(BulkString), ...]
+    let mut out = Vec::new();
+    match val {
+        redis::Value::Array(items) if !items.is_empty() => {
+            for item in items.iter().skip(1) {
+                match item {
+                    redis::Value::BulkString(bytes) => {
+                        if let Ok(s) = std::str::from_utf8(bytes) {
+                            out.push(s.to_string());
+                        }
+                    }
+                    redis::Value::SimpleString(s) => out.push(s.clone()),
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    out
 }
