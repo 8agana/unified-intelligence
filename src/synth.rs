@@ -180,6 +180,7 @@ mod tests {
                     content: "Synthesized response content.".to_string(),
                 },
             }],
+            usage: None,
         };
         let mock_transport = MockTransport::new(vec![mock_response]);
         let groq_synth = GroqSynth::new(
@@ -214,6 +215,7 @@ mod tests {
                     content: "Synthesized response content.".to_string(),
                 },
             }],
+            usage: None,
         };
         let mock_transport = MockTransport::new(vec![mock_response]);
         let groq_synth = GroqSynth::new(
@@ -254,6 +256,7 @@ mod tests {
                     content: "Deep synthesized response content.".to_string(),
                 },
             }],
+            usage: None,
         };
         let mock_transport = MockTransport::new(vec![mock_response]);
         let groq_synth = GroqSynth::new(

@@ -168,6 +168,7 @@ mod tests {
                     .to_string(),
                 },
             }],
+            usage: None,
         };
         let mock_transport = MockTransport::new(vec![mock_response]);
         let groq_intent = GroqIntent::new(Arc::new(mock_transport), "test-model".to_string());

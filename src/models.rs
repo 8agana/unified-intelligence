@@ -238,11 +238,27 @@ pub struct GroqRequest {
 #[derive(Debug, Deserialize)]
 pub struct GroqResponse {
     pub choices: Vec<Choice>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub usage: Option<GroqUsage>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Choice {
     pub message: ChatMessage,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct GroqUsage {
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub prompt_tokens: Option<i32>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub completion_tokens: Option<i32>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub total_tokens: Option<i32>,
 }
 
 // RecallMode enum and UiRecallParams moved to handlers/recall.rs with string-based mode
