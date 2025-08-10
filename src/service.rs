@@ -21,6 +21,7 @@ use crate::rate_limit::RateLimiter;
 use crate::redis::RedisManager;
 use crate::repository::CombinedRedisRepository;
 use crate::tools::ui_context::{UIContextParams, ui_context_impl};
+use crate::tools::ui_memory::{UiMemoryParams, ui_memory_impl};
 use crate::validation::InputValidator;
 
 /// Main service struct for UnifiedIntelligence MCP server
@@ -259,6 +260,33 @@ impl UnifiedIntelligenceService {
         })?;
 
         Ok(CallToolResult::success(vec![content]))
+    }
+
+    #[tool(description = "Search/read/update/delete memory across embeddings with simple filters")]
+    pub async fn ui_memory(
+        &self,
+        params: Parameters<UiMemoryParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
+            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
+            return Err(ErrorData::invalid_params(
+                "Rate limit exceeded. Please slow down your requests.".to_string(),
+                None,
+            ));
+        }
+
+        match ui_memory_impl(&self.config, &self.handlers.redis_manager, params.0).await {
+            Ok(response) => {
+                let content = Content::json(response).map_err(|e| {
+                    ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+                })?;
+                Ok(CallToolResult::success(vec![content]))
+            }
+            Err(e) => {
+                tracing::error!("ui_memory error: {}", e);
+                Err(ErrorData::internal_error(e.to_string(), None))
+            }
+        }
     }
 }
 
