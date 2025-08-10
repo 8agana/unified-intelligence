@@ -3,7 +3,6 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
-use tracing;
 
 /// Main configuration structure for UnifiedIntelligence
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +16,8 @@ pub struct Config {
     pub retry: RetryConfig,
     pub qdrant: QdrantConfig,
     pub groq: GroqConfig,
+    pub openai: OpenAIConfig,
+    pub redis_search: RedisSearchConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,11 +101,11 @@ impl Config {
         // Load environment variables from .env files
         // Try multiple locations since DT runs from different working directory
         let env_paths = [
-            "/Users/samuelatagana/Projects/LegacyMind/.env",  // Absolute path to centralized .env
-            "../.env",                                         // Parent directory
-            ".env",                                            // Current directory
+            "/Users/samuelatagana/Projects/LegacyMind/.env", // Absolute path to centralized .env
+            "../.env",                                       // Parent directory
+            ".env",                                          // Current directory
         ];
-        
+
         let mut env_loaded = false;
         for path in &env_paths {
             if dotenvy::from_path(path).is_ok() {
@@ -113,11 +114,11 @@ impl Config {
                 break;
             }
         }
-        
+
         if !env_loaded {
             tracing::warn!("No .env file found in any expected location");
         }
-        
+
         // Default config path
         let config_path = env::var("UI_CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
 
@@ -313,6 +314,35 @@ impl Config {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenAIConfig {
+    pub embedding_model: String,
+    pub embedding_dimensions: usize,
+    pub api_key_env: Option<String>,
+}
+
+impl OpenAIConfig {
+    #[allow(dead_code)]
+    pub fn api_key(&self) -> anyhow::Result<String> {
+        std::env::var("OPENAI_API_KEY").or_else(|_| {
+            self.api_key_env
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("OPENAI_API_KEY not set"))
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedisSearchConfig {
+    pub hnsw: HNSWConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HNSWConfig {
+    pub m: u32,
+    pub ef_construction: u32,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -369,6 +399,17 @@ impl Default for Config {
                 intent_model: "llama3-8b-8192".to_string(),
                 model_fast: "llama3-8b-8192".to_string(),
                 model_deep: "llama3-70b-8192".to_string(),
+            },
+            openai: OpenAIConfig {
+                embedding_model: "text-embedding-3-small".to_string(),
+                embedding_dimensions: 1536,
+                api_key_env: None,
+            },
+            redis_search: RedisSearchConfig {
+                hnsw: HNSWConfig {
+                    m: 16,
+                    ef_construction: 200,
+                },
             },
         }
     }

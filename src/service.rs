@@ -6,21 +6,21 @@ use rmcp::{
 use rmcp_macros::{tool, tool_handler, tool_router};
 use std::future::Future;
 use std::sync::Arc;
-use tracing;
 
 use crate::config::Config;
 use crate::error::UnifiedIntelligenceError;
+use crate::handlers::ToolHandlers;
 use crate::handlers::help::{HelpHandlerTrait, UiHelpParams};
 use crate::handlers::knowledge::KnowledgeHandler;
 use crate::handlers::recall::UiRecallParams;
 use crate::handlers::thoughts::ThoughtsHandler;
-use crate::handlers::ToolHandlers;
-use crate::models::UiThinkParams;
 use crate::models::UiKnowledgeParams;
-use crate::qdrant_service::QdrantService;
+use crate::models::UiThinkParams;
+use crate::qdrant_service::QdrantServiceTrait;
 use crate::rate_limit::RateLimiter;
 use crate::redis::RedisManager;
 use crate::repository::CombinedRedisRepository;
+use crate::tools::ui_context::{UIContextParams, ui_context_impl};
 use crate::validation::InputValidator;
 
 /// Main service struct for UnifiedIntelligence MCP server
@@ -31,20 +31,21 @@ pub struct UnifiedIntelligenceService {
     rate_limiter: Arc<RateLimiter>,
     instance_id: String,
     config: Arc<Config>,
-    qdrant_service: QdrantService,
+    #[allow(dead_code)]
+    qdrant_service: Arc<dyn QdrantServiceTrait>,
 }
 
 impl UnifiedIntelligenceService {
     /// Create a new service instance
     pub async fn new(
         redis_manager: Arc<RedisManager>,
-        qdrant_service: QdrantService,
+        qdrant_service: Arc<dyn QdrantServiceTrait>,
     ) -> Result<Self, UnifiedIntelligenceError> {
         tracing::info!("Service::new() - Starting initialization");
         // Load configuration
         let config = Arc::new(Config::load().map_err(|e| {
             tracing::error!("Service::new() - Failed to load config: {}", e);
-            UnifiedIntelligenceError::Config(format!("Failed to load config: {}", e))
+            UnifiedIntelligenceError::Config(format!("Failed to load config: {e}"))
         })?);
         tracing::info!("Service::new() - Configuration loaded");
 
@@ -123,7 +124,7 @@ impl UnifiedIntelligenceService {
         if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
             tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
             return Err(ErrorData::invalid_params(
-                format!("Rate limit exceeded. Please slow down your requests."),
+                "Rate limit exceeded. Please slow down your requests.".to_string(),
                 None,
             ));
         }
@@ -131,7 +132,7 @@ impl UnifiedIntelligenceService {
         match self.handlers.ui_think(params.0).await {
             Ok(response) => {
                 let content = Content::json(response).map_err(|e| {
-                    ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None)
+                    ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
                 })?;
                 Ok(CallToolResult::success(vec![content]))
             }
@@ -157,7 +158,7 @@ impl UnifiedIntelligenceService {
         if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
             tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
             return Err(ErrorData::invalid_params(
-                format!("Rate limit exceeded. Please slow down your requests."),
+                "Rate limit exceeded. Please slow down your requests.".to_string(),
                 None,
             ));
         }
@@ -165,14 +166,14 @@ impl UnifiedIntelligenceService {
         match self.handlers.recall.recall(params.0).await {
             Ok(response) => {
                 let content = Content::json(response).map_err(|e| {
-                    ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None)
+                    ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
                 })?;
                 Ok(CallToolResult::success(vec![content]))
             }
             Err(e) => {
                 tracing::error!("ui_recall error: {}", e);
                 Err(ErrorData::internal_error(
-                    format!("Error recalling thought: {}", e),
+                    format!("Error recalling thought: {e}"),
                     None,
                 ))
             }
@@ -188,14 +189,14 @@ impl UnifiedIntelligenceService {
         match self.handlers.ui_help(params.0).await {
             Ok(response) => {
                 let content = Content::json(response).map_err(|e| {
-                    ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None)
+                    ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
                 })?;
                 Ok(CallToolResult::success(vec![content]))
             }
             Err(e) => {
                 tracing::error!("ui_help error: {}", e);
                 Err(ErrorData::internal_error(
-                    format!("Error generating help: {}", e),
+                    format!("Error generating help: {e}"),
                     None,
                 ))
             }
@@ -211,7 +212,7 @@ impl UnifiedIntelligenceService {
         if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
             tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
             return Err(ErrorData::invalid_params(
-                format!("Rate limit exceeded. Please slow down your requests."),
+                "Rate limit exceeded. Please slow down your requests.".to_string(),
                 None,
             ));
         }
@@ -219,7 +220,7 @@ impl UnifiedIntelligenceService {
         match self.handlers.ui_knowledge(params.0).await {
             Ok(response) => {
                 let content = Content::json(response).map_err(|e| {
-                    ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None)
+                    ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
                 })?;
                 Ok(CallToolResult::success(vec![content]))
             }
@@ -228,6 +229,36 @@ impl UnifiedIntelligenceService {
                 Err(ErrorData::internal_error(e.to_string(), None))
             }
         }
+    }
+
+    #[tool(
+        description = "Store UI context (session-summaries|important|federation) or return help"
+    )]
+    pub async fn ui_context(
+        &self,
+        params: Parameters<UIContextParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        // Rate limit similar to other tools
+        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
+            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
+            return Err(ErrorData::invalid_params(
+                "Rate limit exceeded. Please slow down your requests.",
+                None,
+            ));
+        }
+
+        let result = ui_context_impl(&self.config, &self.handlers.redis_manager, params.0)
+            .await
+            .map_err(|e| {
+                tracing::error!("ui_context error: {}", e);
+                ErrorData::internal_error(e.to_string(), None)
+            })?;
+
+        let content = Content::json(result).map_err(|e| {
+            ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+        })?;
+
+        Ok(CallToolResult::success(vec![content]))
     }
 }
 

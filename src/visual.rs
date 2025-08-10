@@ -16,7 +16,7 @@ impl VisualOutput {
             "{} {}{}{}",
             "🧠".blue(),
             "Thought ".bright_blue(),
-            format!("{}/{}", thought_number, total_thoughts).bright_white(),
+            format!("{thought_number}/{total_thoughts}").bright_white(),
             ":".bright_blue()
         );
     }
@@ -34,18 +34,16 @@ impl VisualOutput {
                 let mut current_line = String::new();
 
                 for word in words {
-                    if current_line.len() + word.len() + 1 <= max_width {
+                    if current_line.len() + word.len() < max_width {
                         if !current_line.is_empty() {
                             current_line.push(' ');
                         }
                         current_line.push_str(word);
+                    } else if !current_line.is_empty() {
+                        eprintln!("   {}", current_line.white());
+                        current_line = word.to_string();
                     } else {
-                        if !current_line.is_empty() {
-                            eprintln!("   {}", current_line.white());
-                            current_line = word.to_string();
-                        } else {
-                            eprintln!("   {}", word.white());
-                        }
+                        eprintln!("   {}", word.white());
                     }
                 }
                 if !current_line.is_empty() {
@@ -93,14 +91,14 @@ impl VisualOutput {
             eprintln!(
                 "{} {} {}",
                 "🔍".yellow(),
-                format!("Found {} thoughts", count).bright_yellow(),
-                format!("for: {}", query).yellow()
+                format!("Found {count} thoughts").bright_yellow(),
+                format!("for: {query}").yellow()
             );
         } else {
             eprintln!(
                 "{} {}",
                 "🔍".yellow(),
-                format!("No thoughts found for: {}", query).yellow()
+                format!("No thoughts found for: {query}").yellow()
             );
         }
     }

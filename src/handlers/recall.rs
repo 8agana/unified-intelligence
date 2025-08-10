@@ -1,4 +1,4 @@
-use crate::repository_traits::{ThoughtRepository, KnowledgeRepository};
+use crate::repository_traits::{KnowledgeRepository, ThoughtRepository};
 use rmcp::model::{CallToolResult, Content, ErrorData};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -43,7 +43,7 @@ impl<R: ThoughtRepository + KnowledgeRepository> RecallHandler<R> {
                         info!("Successfully recalled thought: {}", thought_id);
                         let content = Content::json(thought).map_err(|e| {
                             ErrorData::internal_error(
-                                format!("Failed to serialize thought: {}", e),
+                                format!("Failed to serialize thought: {e}"),
                                 None,
                             )
                         })?;
@@ -52,14 +52,14 @@ impl<R: ThoughtRepository + KnowledgeRepository> RecallHandler<R> {
                     Ok(None) => {
                         warn!("Thought not found: {}", thought_id);
                         Err(ErrorData::invalid_params(
-                            format!("Thought with ID {} not found.", thought_id),
+                            format!("Thought with ID {thought_id} not found."),
                             None,
                         ))
                     }
                     Err(e) => {
                         warn!("Error recalling thought {}: {}", thought_id, e);
                         Err(ErrorData::internal_error(
-                            format!("Error recalling thought: {}", e),
+                            format!("Error recalling thought: {e}"),
                             None,
                         ))
                     }
@@ -81,7 +81,7 @@ impl<R: ThoughtRepository + KnowledgeRepository> RecallHandler<R> {
                         );
                         let content = Content::json(thoughts).map_err(|e| {
                             ErrorData::internal_error(
-                                format!("Failed to serialize chain thoughts: {}", e),
+                                format!("Failed to serialize chain thoughts: {e}"),
                                 None,
                             )
                         })?;
@@ -90,7 +90,7 @@ impl<R: ThoughtRepository + KnowledgeRepository> RecallHandler<R> {
                     Err(e) => {
                         warn!("Error recalling chain {}: {}", chain_id, e);
                         Err(ErrorData::internal_error(
-                            format!("Error recalling chain: {}", e),
+                            format!("Error recalling chain: {e}"),
                             None,
                         ))
                     }

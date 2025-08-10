@@ -4,7 +4,6 @@ use async_openai::{
     config::OpenAIConfig,
     types::{CreateEmbeddingRequestArgs, EmbeddingInput},
 };
-use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::error::UnifiedIntelligenceError;

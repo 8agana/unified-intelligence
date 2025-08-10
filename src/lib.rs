@@ -3,8 +3,13 @@ pub mod error;
 pub mod intent;
 pub mod models;
 pub mod synth;
+pub mod tools;
 pub mod transport;
 pub mod validation;
+
+// Expose modules used by library submodules (e.g., tools::ui_context)
+pub mod lua_scripts;
+pub mod redis;
 
 use std::sync::Arc;
 

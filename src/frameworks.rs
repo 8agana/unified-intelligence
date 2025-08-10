@@ -35,6 +35,7 @@ impl FrameworkError {
 }
 
 /// Available thinking frameworks
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ThinkingFramework {
     OODA,            // Observe, Orient, Decide, Act
@@ -260,10 +261,8 @@ impl FrameworkProcessor {
     /// Root Cause Analysis (Five Whys) framework
     fn process_root_cause(&self, _thought: &str, thought_number: i32) -> FrameworkResult {
         let why_number = std::cmp::min(thought_number, 5);
-        let prompt = format!(
-            "Why #{}: Why is this happening? (Dig deeper into the root cause)",
-            why_number
-        );
+        let prompt =
+            format!("Why #{why_number}: Why is this happening? (Dig deeper into the root cause)");
 
         let prompts = vec![prompt, "What evidence supports this cause?".to_string()];
 

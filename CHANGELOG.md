@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Build + MCP Tool Wiring - 2025-08-10
+- Added `ui_context` MCP tool endpoint in `src/service.rs` using `#[tool]`, wiring it to `tools::ui_context::ui_context_impl` with rate limiting and JSON result handling.
+- Exposed missing modules in `src/lib.rs` to fix unresolved imports (`pub mod redis;`, `pub mod lua_scripts;`).
+- Fixed compile errors in `src/tools/ui_context.rs`:
+  - Explicit byte cast for embeddings: `let vector_bytes: Vec<u8> = bytemuck::cast_slice(&vector_f32).to_vec();`.
+  - Specified unit return type for `FT.CREATE` query to satisfy `FromRedisValue`.
+- Declared `mod tools;` in `src/main.rs` to make `crate::tools` visible to the bin crate.
+- Cleaned unused imports in `src/tools/ui_context.rs` and addressed clippy warning (`uninlined_format_args`) in `src/service.rs`.
+- Ensured repo passes: `cargo build`, `cargo clippy -- -D warnings`, and `cargo fmt -- --check`.
+
+Notes
+- Unit tests currently emit warnings and one failure due to direct construction of `RedisManager` using private fields in `src/handlers/test_handlers.rs`. Consider updating tests to use a constructor, a trait-based mock, or helper factory instead of struct literal initialization.
+
 ### CRITICAL MCP PROTOCOL FIX - 2025-08-04
 - **FIXED "Unexpected token 'F'" ERROR**: Resolved DT connection failure that has been blocking usage for days
   - Qdrant client was outputting "Failed to obtain server version" to stdout before MCP handshake
@@ -83,4 +96,3 @@ All notable changes to this project will be documented in this file.
 ```
 - Replace, add, or remove sections as appropriate for your project.
 - For each new release, copy the "Unreleased" section, change the version/date, and start a new "Unreleased" section.
-

@@ -253,8 +253,8 @@ pub struct Choice {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum KnowledgeScope {
-    Federation,  // Default for work-related entities
-    Personal,    // Instance-specific context
+    Federation, // Default for work-related entities
+    Personal,   // Instance-specific context
 }
 
 impl Default for KnowledgeScope {
@@ -294,7 +294,7 @@ impl std::fmt::Display for EntityType {
             Self::Concept => write!(f, "concept"),
             Self::Tool => write!(f, "tool"),
             Self::Framework => write!(f, "framework"),
-            Self::Custom(s) => write!(f, "{}", s),
+            Self::Custom(s) => write!(f, "{s}"),
         }
     }
 }
@@ -347,15 +347,20 @@ pub struct RelationMetadata {
 /// Parameters for ui_knowledge tool - flattened structure for CC compatibility
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UiKnowledgeParams {
-    #[schemars(description = "Operation mode: create, search, set_active, get_entity, create_relation, get_relations, update_entity, delete_entity", regex(pattern = r"^(create|search|set_active|get_entity|create_relation|get_relations|update_entity|delete_entity)$"))]
+    #[schemars(
+        description = "Operation mode: create, search, set_active, get_entity, create_relation, get_relations, update_entity, delete_entity",
+        regex(
+            pattern = r"^(create|search|set_active|get_entity|create_relation|get_relations|update_entity|delete_entity)$"
+        )
+    )]
     pub mode: String,
-    
+
     // Common fields
     #[serde(default)]
     pub entity_id: Option<String>,
     #[serde(default)]
     pub scope: Option<KnowledgeScope>,
-    
+
     // For create/update
     #[serde(default)]
     pub name: Option<String>,
@@ -367,13 +372,13 @@ pub struct UiKnowledgeParams {
     pub attributes: Option<std::collections::HashMap<String, serde_json::Value>>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
-    
+
     // For search
     #[serde(default)]
     pub query: Option<String>,
     #[serde(default)]
     pub limit: Option<usize>,
-    
+
     // For relations
     #[serde(default)]
     pub from_entity_id: Option<String>,
@@ -387,7 +392,6 @@ pub struct UiKnowledgeParams {
     pub weight: Option<f32>,
 }
 
-
 /// Response from knowledge operations
 #[derive(Debug, Serialize)]
 pub struct KnowledgeResponse {
@@ -400,6 +404,7 @@ pub struct KnowledgeResponse {
 
 impl KnowledgeScope {
     /// Determine appropriate scope based on context
+    #[allow(dead_code)]
     pub fn from_context(entity_type: &EntityType, instance: &str) -> Self {
         match entity_type {
             EntityType::Issue | EntityType::System | EntityType::Tool => {

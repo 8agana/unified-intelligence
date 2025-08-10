@@ -1,14 +1,13 @@
-use std::env;
-use std::sync::Arc;
-use tracing;
 use crate::embeddings::generate_openai_embedding;
 use crate::error::{Result, UnifiedIntelligenceError};
 use crate::frameworks::{FrameworkProcessor, FrameworkVisual, ThinkingFramework};
 use crate::intent::{GroqIntent, IntentParser};
 use crate::models::{ChainMetadata, ThinkResponse, ThoughtRecord, UiThinkParams};
-use crate::repository_traits::{ThoughtRepository, KnowledgeRepository};
+use crate::repository_traits::{KnowledgeRepository, ThoughtRepository};
 use crate::synth::{GroqSynth, Synthesizer};
 use crate::transport::{GroqTransport, Transport};
+use std::env;
+use std::sync::Arc;
 
 /// Trait for thought-related operations
 pub trait ThoughtsHandler {
@@ -127,10 +126,7 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
                 UnifiedIntelligenceError::EnvVar("OPENAI_API_KEY not found".to_string())
             })?;
             let groq_api_key_val = self.config.groq.api_key.clone();
-            let groq_transport = Arc::new(
-                GroqTransport::new(groq_api_key_val.clone())
-                    .map_err(crate::error::UnifiedIntelligenceError::from)?,
-            );
+            let groq_transport = Arc::new(GroqTransport::new(groq_api_key_val.clone())?);
             let groq_intent_parser = GroqIntent::new(
                 Arc::clone(&groq_transport) as Arc<dyn Transport>,
                 self.config.groq.intent_model.clone(),
@@ -155,7 +151,7 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
                 Err(e) => {
                     tracing::error!("Failed to parse query intent with Groq: {}", e);
                     self.visual
-                        .error(&format!("Remember framework intent parsing error: {}", e));
+                        .error(&format!("Remember framework intent parsing error: {e}"));
                     // Fallback to original thought and default synthesis style
                     crate::models::QueryIntent {
                         original_query: params.thought.clone(),
@@ -209,8 +205,7 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
                             if retrieved_memories_val.is_empty() {
                                 tracing::warn!("No relevant memories found in Qdrant.");
                                 let thought2_content = format!(
-                                    "No relevant memories found for: {}",
-                                    query_for_embedding
+                                    "No relevant memories found for: {query_for_embedding}"
                                 );
                                 let thought2 = ThoughtRecord::new(
                                     self.instance_id.clone(),
@@ -277,8 +272,7 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
                                     Err(e) => {
                                         tracing::error!("Groq synthesis failed: {}", e);
                                         self.visual.error(&format!(
-                                            "Remember framework synthesis error: {}",
-                                            e
+                                            "Remember framework synthesis error: {e}"
                                         ));
                                         // Continue without failing the entire operation
                                     }
@@ -288,7 +282,7 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
                         Err(e) => {
                             tracing::error!("Qdrant search failed: {}", e);
                             self.visual
-                                .error(&format!("Remember framework Qdrant error: {}", e));
+                                .error(&format!("Remember framework Qdrant error: {e}"));
                             // Continue without failing the entire operation
                         }
                     }
@@ -296,7 +290,7 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
                 Err(e) => {
                     tracing::error!("OpenAI embedding failed: {}", e);
                     self.visual
-                        .error(&format!("Remember framework embedding error: {}", e));
+                        .error(&format!("Remember framework embedding error: {e}"));
                     // Continue without failing the entire operation
                 }
             }
