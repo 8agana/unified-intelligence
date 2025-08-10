@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### UI Context TTL Behavior - 2025-08-10
+- Default behavior change: ui_context embedding hashes now have no expiration by default.
+- New option: callers can set ttl_seconds > 0 to set an expiry; omitting ttl_seconds leaves keys persistent.
+- Notes: existing keys unaffected; no changes to other tools.
+- Verification: cargo build, cargo clippy -- -D warnings, cargo fmt -- --check all pass.
+
 ### Build + MCP Tool Wiring - 2025-08-10
 - Added `ui_context` MCP tool endpoint in `src/service.rs` using `#[tool]`, wiring it to `tools::ui_context::ui_context_impl` with rate limiting and JSON result handling.
 - Exposed missing modules in `src/lib.rs` to fix unresolved imports (`pub mod redis;`, `pub mod lua_scripts;`).
