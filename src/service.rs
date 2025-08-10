@@ -8,6 +8,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use crate::config::Config;
+use crate::embeddings::generate_openai_embedding;
 use crate::error::UnifiedIntelligenceError;
 use crate::handlers::ToolHandlers;
 use crate::handlers::help::{HelpHandlerTrait, UiHelpParams};
@@ -26,6 +27,7 @@ use crate::tools::ui_context::{UIContextParams, ui_context_impl};
 use crate::tools::ui_memory::{UiMemoryParams, ui_memory_impl};
 use crate::tools::ui_remember::{UiRememberParams, UiRememberResult};
 use crate::validation::InputValidator;
+use bytemuck::cast_slice;
 
 /// Main service struct for UnifiedIntelligence MCP server
 #[derive(Clone)]
@@ -305,8 +307,95 @@ impl UnifiedIntelligenceService {
             ));
         }
 
-        // 1) Store Thought 1 (user query)
+        // 0) If there is a prior assistant synthesis in this chain, update its feedback from current user behavior
         let p = params.0;
+        if let Some(ref chain_id) = p.chain_id {
+            if let Ok(chain_thoughts) = self
+                .handlers
+                .repository
+                .get_chain_thoughts(&self.instance_id, chain_id)
+                .await
+            {
+                if let Some(prev_assistant) = chain_thoughts
+                    .iter()
+                    .filter(|t| t.category.as_deref() == Some("ui_remember:assistant"))
+                    .max_by_key(|t| t.timestamp.clone())
+                {
+                    let prev_ts = chrono::DateTime::parse_from_rfc3339(&prev_assistant.timestamp)
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .unwrap_or_else(|_| chrono::Utc::now());
+                    let now = chrono::Utc::now();
+                    let delta = (now - prev_ts).num_seconds().max(0);
+
+                    let lc = p.thought.to_lowercase();
+                    let corrected = [
+                        "actually",
+                        "no,",
+                        "that's not",
+                        "incorrect",
+                        "correction",
+                        "wrong",
+                        "not true",
+                        "should be",
+                    ]
+                    .iter()
+                    .any(|s| lc.contains(s));
+
+                    let positive_ack = [
+                        "thanks",
+                        "thank you",
+                        "got it",
+                        "great",
+                        "perfect",
+                        "that works",
+                        "awesome",
+                        "nice",
+                    ]
+                    .iter()
+                    .any(|s| lc.contains(s));
+
+                    // Base score from responsiveness
+                    let mut score = if corrected {
+                        0.3
+                    } else if delta < 30 {
+                        0.9
+                    } else if delta < 120 {
+                        0.7
+                    } else {
+                        0.5
+                    };
+
+                    // Adjust for positive acknowledgments
+                    if positive_ack {
+                        score = (score + 0.1f64).min(1.0f64);
+                    }
+                    // Slight penalty if clear correction
+                    if corrected {
+                        score = (score - 0.1f64).max(0.0f64);
+                    }
+
+                    // Opportunistic abandon marking: if no follow-up for >= 10 minutes
+                    let abandoned = if delta >= 600 { 1 } else { 0 };
+
+                    if let Ok(mut con) = self.handlers.redis_manager.get_connection().await {
+                        let key = format!("voice:feedback:{}", prev_assistant.id);
+                        let corrected_text = if corrected { &p.thought } else { "" };
+                        let _: () = redis::pipe()
+                            .hset(&key, "continued", 1)
+                            .hset(&key, "time_to_next", delta)
+                            .hset(&key, "corrected", corrected_text)
+                            .hset(&key, "synthesis_quality", score)
+                            .hset(&key, "feedback_score", score)
+                            .hset(&key, "abandoned", abandoned)
+                            .query_async(&mut *con)
+                            .await
+                            .unwrap_or(());
+                    }
+                }
+            }
+        }
+
+        // 1) Store Thought 1 (user query)
         let t1 = crate::models::ThoughtRecord::new(
             self.instance_id.clone(),
             p.thought.clone(),
@@ -326,7 +415,7 @@ impl UnifiedIntelligenceService {
             return Err(ErrorData::internal_error(e.to_string(), None));
         }
 
-        // 2) Simple retrieval (text search over thoughts) to seed synthesis context (minimal step-1)
+        // 2) Retrieval: text search over thoughts + embedding KNN over memory indices
         let retrieved = match self
             .handlers
             .repository
@@ -343,8 +432,95 @@ impl UnifiedIntelligenceService {
             }
         };
 
-        // Convert ThoughtRecord -> Thought for Synth
-        let mut ctx_thoughts: Vec<crate::models::Thought> = Vec::new();
+        // Embedding KNN across memory indexes
+        let mut knn_items: Vec<(String, String, i64)> = Vec::new(); // (key, content, ts)
+        if let Ok(openai_key) = std::env::var("OPENAI_API_KEY") {
+            if let Ok(embedding) =
+                generate_openai_embedding(&p.thought, &openai_key, &self.handlers.redis_manager)
+                    .await
+            {
+                let dims = self.config.openai.embedding_dimensions;
+                if embedding.len() == dims {
+                    let vec_bytes: Vec<u8> = cast_slice(&embedding).to_vec();
+                    let instance_id = &self.instance_id;
+                    let indexes = vec![
+                        format!("idx:{instance_id}:session-summaries"),
+                        format!("idx:{instance_id}:important"),
+                        "idx:Federation:embeddings".to_string(),
+                    ];
+                    if let Ok(mut con) = self.handlers.redis_manager.get_connection().await {
+                        for idx in indexes {
+                            let val: redis::Value = redis::cmd("FT.SEARCH")
+                                .arg(&idx)
+                                .arg("*=>[KNN $k @vector $vec AS score]")
+                                .arg("PARAMS")
+                                .arg(4)
+                                .arg("k")
+                                .arg(5)
+                                .arg("vec")
+                                .arg(vec_bytes.as_slice())
+                                .arg("SORTBY")
+                                .arg("score")
+                                .arg("RETURN")
+                                .arg(0)
+                                .arg("DIALECT")
+                                .arg(2)
+                                .query_async(&mut *con)
+                                .await
+                                .unwrap_or(redis::Value::Nil);
+                            let keys = extract_doc_ids(&val);
+                            if keys.is_empty() {
+                                continue;
+                            }
+                            let mut pipe = redis::pipe();
+                            for k in &keys {
+                                pipe.hgetall(k);
+                            }
+                            let maps: Vec<std::collections::HashMap<String, String>> =
+                                pipe.query_async(&mut *con).await.unwrap_or_default();
+                            for (i, m) in maps.into_iter().enumerate() {
+                                if m.is_empty() {
+                                    continue;
+                                }
+                                let content = m.get("content").cloned().unwrap_or_default();
+                                let ts = m
+                                    .get("ts")
+                                    .and_then(|s| s.parse::<i64>().ok())
+                                    .unwrap_or_default();
+                                knn_items.push((keys[i].clone(), content, ts));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let knn_count = knn_items.len();
+        // Simple recency proxy: average age (seconds) of KNN items
+        let now_ts = chrono::Utc::now().timestamp();
+        let avg_age_secs: i64 = if knn_count > 0 {
+            let sum: i64 = knn_items
+                .iter()
+                .map(|(_, _, ts)| (now_ts - *ts).max(0))
+                .sum();
+            sum / (knn_count as i64)
+        } else {
+            0
+        };
+
+        // Build candidate set with simple hybrid scoring (semantic/text/recency)
+        struct Cand {
+            thought: crate::models::Thought,
+            combined: f64,
+        }
+        let tau_secs: f64 = 86_400.0; // 1 day decay constant for recency
+        let recency = |t: &chrono::DateTime<chrono::Utc>| -> f64 {
+            let age = (chrono::Utc::now() - *t).num_seconds().max(0) as f64;
+            (-age / tau_secs).exp()
+        };
+
+        let mut cands: Vec<Cand> = Vec::new();
+
+        // Text hits -> text=1.0, semantic=0.0
         for r in &retrieved {
             let id = match uuid::Uuid::parse_str(&r.id) {
                 Ok(u) => u,
@@ -353,22 +529,69 @@ impl UnifiedIntelligenceService {
             let ts = chrono::DateTime::parse_from_rfc3339(&r.timestamp)
                 .map(|dt| dt.with_timezone(&chrono::Utc))
                 .unwrap_or_else(|_| chrono::Utc::now());
-            ctx_thoughts.push(crate::models::Thought {
-                id,
-                content: r.content.clone(),
-                category: r.category.clone(),
-                tags: r.tags.clone().unwrap_or_default(),
-                instance_id: r.instance.clone(),
-                created_at: ts,
-                updated_at: ts,
-                importance: r.importance.unwrap_or(5),
-                relevance: r.relevance.unwrap_or(5),
-                semantic_score: None,
-                temporal_score: None,
-                usage_score: None,
-                combined_score: None,
+            let text_score = 1.0f64;
+            let semantic_score = 0.0f64;
+            let rec = recency(&ts);
+            let combined = 0.6 * semantic_score + 0.25 * text_score + 0.15 * rec;
+            cands.push(Cand {
+                thought: crate::models::Thought {
+                    id,
+                    content: r.content.clone(),
+                    category: r.category.clone(),
+                    tags: r.tags.clone().unwrap_or_default(),
+                    instance_id: r.instance.clone(),
+                    created_at: ts,
+                    updated_at: ts,
+                    importance: r.importance.unwrap_or(5),
+                    relevance: r.relevance.unwrap_or(5),
+                    semantic_score: None,
+                    temporal_score: None,
+                    usage_score: None,
+                    combined_score: None,
+                },
+                combined,
             });
         }
+        // KNN items -> semantic=1.0, text=0.0
+        for (_key, content, ts) in &knn_items {
+            let id = uuid::Uuid::new_v4();
+            let tsdt = chrono::DateTime::from_timestamp(*ts, 0).unwrap_or_else(chrono::Utc::now);
+            let text_score = 0.0f64;
+            let semantic_score = 1.0f64; // placeholder until we extract actual distance
+            let rec = recency(&tsdt);
+            let combined = 0.6 * semantic_score + 0.25 * text_score + 0.15 * rec;
+            cands.push(Cand {
+                thought: crate::models::Thought {
+                    id,
+                    content: content.clone(),
+                    category: None,
+                    tags: vec![],
+                    instance_id: self.instance_id.clone(),
+                    created_at: tsdt,
+                    updated_at: tsdt,
+                    importance: 5,
+                    relevance: 5,
+                    semantic_score: None,
+                    temporal_score: None,
+                    usage_score: None,
+                    combined_score: None,
+                },
+                combined,
+            });
+        }
+
+        // Sort candidates and cap to top_k (default 5)
+        let top_k_used: usize = p.top_k.map(|v| v as usize).unwrap_or(5);
+        cands.sort_by(|a, b| {
+            b.combined
+                .partial_cmp(&a.combined)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let ctx_thoughts: Vec<crate::models::Thought> = cands
+            .into_iter()
+            .take(top_k_used)
+            .map(|c| c.thought)
+            .collect();
 
         // 3) Build intent and synthesize via Groq
         let intent = crate::models::QueryIntent {
@@ -398,7 +621,7 @@ impl UnifiedIntelligenceService {
         // 4) Store Thought 2 (assistant synthesis)
         let t2 = crate::models::ThoughtRecord::new(
             self.instance_id.clone(),
-            synthesized,
+            synthesized.text.clone(),
             p.thought_number + 1,
             p.total_thoughts.max(2),
             p.chain_id.clone(),
@@ -417,9 +640,13 @@ impl UnifiedIntelligenceService {
 
         // 5) Store Thought 3 (system metrics note) and seed feedback hash for T2
         let metrics_text = format!(
-            "[ui_remember:metrics]\nretrieved_text={}\nlatency_ms={}\nmodel=fast",
-            ctx_thoughts.len(),
-            _latency_ms
+            "[ui_remember:metrics]\\nretrieved_text={}\\nretrieved_embedding={}\\navg_age_secs={}\\nlatency_ms={}\\nmodel={}\\ntop_k_used={}",
+            retrieved.len(),
+            knn_count,
+            avg_age_secs,
+            _latency_ms,
+            synthesized.model_used.clone(),
+            top_k_used
         );
         let t3 = crate::models::ThoughtRecord::new(
             self.instance_id.clone(),
@@ -457,14 +684,36 @@ impl UnifiedIntelligenceService {
             thought1_id,
             thought2_id,
             thought3_id: Some(thought3_id),
-            model_used: Some(self.config.groq.model_fast.clone()), // selection logic to come
-            usage_total_tokens: None, // extend when Groq usage is wired through
+            model_used: Some(synthesized.model_used.clone()),
+            usage_total_tokens: synthesized.usage.as_ref().and_then(|u| u.total_tokens),
         };
 
         let content = Content::json(result)
             .map_err(|e| ErrorData::internal_error(format!("JSON encode error: {e}"), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
+}
+
+// Minimal extractor for FT.SEARCH NOCONTENT responses
+fn extract_doc_ids(val: &redis::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    match val {
+        redis::Value::Array(items) if !items.is_empty() => {
+            for item in items.iter().skip(1) {
+                match item {
+                    redis::Value::BulkString(bytes) => {
+                        if let Ok(s) = std::str::from_utf8(bytes) {
+                            out.push(s.to_string());
+                        }
+                    }
+                    redis::Value::SimpleString(s) => out.push(s.clone()),
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    out
 }
 
 #[tool_handler]

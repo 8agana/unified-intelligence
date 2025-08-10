@@ -33,7 +33,7 @@ pub struct UiRememberParams {
     pub temporal: Option<String>,
 }
 
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct UiRememberResult {
     pub status: String,
     pub thought1_id: String,

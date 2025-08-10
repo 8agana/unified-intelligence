@@ -2,8 +2,15 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::error::{Result, UnifiedIntelligenceError};
-use crate::models::{ChatMessage, GroqRequest, QueryIntent, Thought};
+use crate::models::{ChatMessage, GroqRequest, GroqUsage, QueryIntent, Thought};
 use crate::transport::Transport;
+
+#[derive(Debug, Clone)]
+pub struct SynthResult {
+    pub text: String,
+    pub usage: Option<GroqUsage>,
+    pub model_used: String,
+}
 
 pub struct GroqSynth {
     tx: Arc<dyn Transport>,
@@ -25,12 +32,12 @@ impl GroqSynth {
 #[async_trait]
 pub trait Synthesizer: Send + Sync {
     #[cfg_attr(not(test), allow(dead_code))]
-    async fn synth(&self, intent: &QueryIntent, ctx: &[Thought]) -> Result<String>;
+    async fn synth(&self, intent: &QueryIntent, ctx: &[Thought]) -> Result<SynthResult>;
 }
 
 #[async_trait]
 impl Synthesizer for GroqSynth {
-    async fn synth(&self, intent: &QueryIntent, ctx: &[Thought]) -> Result<String> {
+    async fn synth(&self, intent: &QueryIntent, ctx: &[Thought]) -> Result<SynthResult> {
         tracing::info!(
             "Synthesizing response with Groq for query: {}",
             intent.original_query
@@ -104,7 +111,11 @@ impl Synthesizer for GroqSynth {
         let groq_response = self.tx.chat(&request).await?;
 
         if let Some(choice) = groq_response.choices.first() {
-            Ok(choice.message.content.clone())
+            Ok(SynthResult {
+                text: choice.message.content.clone(),
+                usage: groq_response.usage.clone(),
+                model_used: request.model,
+            })
         } else {
             Err(UnifiedIntelligenceError::Internal(
                 "Groq API returned empty choices".to_string(),
@@ -203,7 +214,9 @@ mod tests {
             .synth(&intent, &thoughts)
             .await
             .expect("Synthesis should succeed in test");
-        assert_eq!(result, "Synthesized response content.");
+        assert_eq!(result.text, "Synthesized response content.");
+        assert!(result.usage.is_none());
+        assert!(!result.model_used.is_empty());
     }
 
     #[tokio::test]
@@ -243,7 +256,7 @@ mod tests {
             .synth(&intent, &thoughts)
             .await
             .expect("Synthesis should succeed in test");
-        assert_eq!(result, "Synthesized response content.");
+        assert_eq!(result.text, "Synthesized response content.");
         // Further assertions could check the actual context length passed to the mock transport
     }
 
@@ -276,6 +289,7 @@ mod tests {
             .synth(&intent, &thoughts)
             .await
             .expect("Synthesis should succeed in test");
-        assert_eq!(result, "Deep synthesized response content.");
+        assert_eq!(result.text, "Deep synthesized response content.");
+        assert_eq!(result.model_used, "deep-model");
     }
 }

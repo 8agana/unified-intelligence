@@ -45,6 +45,7 @@ impl UiService {
 
     pub async fn answer(&self, q: &str, thoughts: &[Thought]) -> Result<String> {
         let intent = self.parser.parse(q).await?;
-        self.synth.synth(&intent, thoughts).await
+        let synth = self.synth.synth(&intent, thoughts).await?;
+        Ok(synth.text)
     }
 }
