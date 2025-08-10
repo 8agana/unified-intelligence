@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Result, anyhow, ensure};
 use async_openai::{
     Client,
     config::OpenAIConfig,
@@ -143,15 +143,12 @@ pub async fn ui_context_impl(
         config.redis_search.hnsw.ef_construction,
     )
     .await
-    .with_context(|| format!("ensure index {index}"))?;
+    .map_err(|e| anyhow!("ensure index {index}: {e}"))?;
 
     // --- Write HASH + TTL ---
     // Convert f32 vector to raw bytes for RediSearch VECTOR field
     let vector_bytes: Vec<u8> = bytemuck::cast_slice(&vector_f32).to_vec();
     let ts = Utc::now().timestamp();
-    let ttl = params
-        .ttl_seconds
-        .unwrap_or(config.redis.default_ttl_seconds as u64);
     let tags_csv = if params.tags.is_empty() {
         "".into()
     } else {
@@ -160,17 +157,23 @@ pub async fn ui_context_impl(
 
     {
         let mut con = redis_manager.get_connection().await?;
-        let _: () = redis::pipe()
-            .hset(&key, "content", &params.content)
+        let mut pipe = redis::pipe();
+
+        pipe.hset(&key, "content", &params.content)
             .hset(&key, "tags", tags_csv)
             .hset(&key, "importance", params.importance.unwrap_or_default())
             .hset(&key, "chain_id", params.chain_id.unwrap_or_default())
             .hset(&key, "thought_id", params.thought_id.unwrap_or_default())
             .hset(&key, "ts", ts)
-            .hset(&key, "vector", vector_bytes)
-            .expire(&key, ttl as i64)
-            .query_async(&mut *con)
-            .await?;
+            .hset(&key, "vector", vector_bytes);
+
+        if let Some(ttl) = params.ttl_seconds {
+            if ttl > 0 {
+                pipe.expire(&key, ttl as i64);
+            }
+        }
+
+        let _: () = pipe.query_async(&mut *con).await?;
     }
 
     Ok(UIContextResult {
@@ -231,8 +234,8 @@ async fn ensure_index_if_needed(
 ) -> Result<bool> {
     let mut con = redis_manager.get_connection().await?;
 
-    // Does FT.INFO exist?
-    let info: redis::RedisResult<String> = redis::cmd("FT.INFO")
+    // Check if index exists (response is a complex structure; we only care about success)
+    let info: redis::RedisResult<redis::Value> = redis::cmd("FT.INFO")
         .arg(index)
         .query_async(&mut *con)
         .await;
@@ -254,7 +257,9 @@ async fn ensure_index_if_needed(
     }
 
     // Create index
-    let _: () = redis::cmd("FT.CREATE")
+    // HNSW requires the count of subsequent arguments (key-value pairs).
+    // We pass 5 pairs => 10 arguments.
+    let create_res: redis::RedisResult<()> = redis::cmd("FT.CREATE")
         .arg(index)
         .arg("ON")
         .arg("HASH")
@@ -276,7 +281,7 @@ async fn ensure_index_if_needed(
         .arg("vector")
         .arg("VECTOR")
         .arg("HNSW")
-        .arg(6)
+        .arg(10)
         .arg("TYPE")
         .arg("FLOAT32")
         .arg("DIM")
@@ -288,7 +293,22 @@ async fn ensure_index_if_needed(
         .arg("EF_CONSTRUCTION")
         .arg(ef_construction)
         .query_async(&mut *con)
-        .await?;
+        .await;
 
-    Ok(true)
+    match create_res {
+        Ok(()) => Ok(true),
+        Err(e) => {
+            let msg = e.to_string().to_lowercase();
+            if msg.contains("index already exists") {
+                Ok(false)
+            } else if msg.contains("unknown command") || msg.contains("module not loaded") {
+                Err(anyhow!(
+                    "RediSearch not available: {}. Ensure the RediSearch module is loaded.",
+                    e
+                ))
+            } else {
+                Err(anyhow!("FT.CREATE {} failed: {}", index, e))
+            }
+        }
+    }
 }
