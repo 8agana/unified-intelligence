@@ -12,7 +12,7 @@ use redis::AsyncCommands;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+// use std::collections::HashMap; // no longer needed; using HMGET to avoid binary fields
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Default)]
 pub struct UiMemoryParams {
@@ -184,6 +184,34 @@ pub async fn ui_memory_impl(
     let mut con = redis_manager.get_connection().await?;
 
     match params.action.as_str() {
+        "help" => {
+            let help = r#"ui_memory tool
+Actions:
+  - search: keyword search with optional filters
+  - read: read exact keys
+  - update: update fields, optionally re-embed on content change
+  - delete: delete exact keys
+
+Params shape:
+  {
+    action: "search|read|update|delete|help",
+    query?: string,
+    scope?: "all|session-summaries|important|federation" (default: all),
+    filters?: { tags?: string[], importance?: string, chain_id?: string, thought_id?: string },
+    options?: { limit?: number, offset?: number, k?: number, search_type?: string },
+    targets?: { keys?: string[] },
+    update?: { content?: string, tags?: string[], importance?: string, chain_id?: string, thought_id?: string, ttl_seconds?: number }
+  }
+
+Troubleshooting:
+  - UTF-8 errors: The tool now avoids fetching binary fields like 'vector'. Use read/update routes which HMGET only text fields.
+  - Empty results: Ensure the RediSearch indices exist and scope is correct. Supported indices: idx:{instance}:session-summaries, idx:{instance}:important, idx:Federation:embeddings.
+"#;
+            Ok(UiMemoryResult {
+                message: Some(help.to_string()),
+                ..Default::default()
+            })
+        }
         "search" => {
             // Keyword-only search MVP with filters. Uses RediSearch to get ids, then HGET fields.
             let instance_id = std::env::var("INSTANCE_ID")
@@ -245,26 +273,43 @@ pub async fn ui_memory_impl(
                     continue;
                 }
 
+                // Fetch only text fields to avoid UTF-8 issues with binary 'vector'
+                let fields = [
+                    "content",
+                    "tags",
+                    "importance",
+                    "chain_id",
+                    "thought_id",
+                    "ts",
+                ];
                 let mut pipe = redis::pipe();
                 for k in &keys {
-                    pipe.hgetall(k);
+                    pipe.cmd("HMGET").arg(k).arg(&fields);
                 }
-                let maps: Vec<HashMap<String, String>> = pipe.query_async(&mut *con).await?;
-                for (i, m) in maps.into_iter().enumerate() {
-                    if m.is_empty() {
-                        continue;
-                    }
+                let rows: Vec<Vec<Option<String>>> = pipe.query_async(&mut *con).await?;
+                for (i, row) in rows.into_iter().enumerate() {
+                    let mut it = row.into_iter();
+                    let content = it.next().flatten().unwrap_or_default();
+                    let tags = it
+                        .next()
+                        .flatten()
+                        .map(|s| s.split(',').map(|x| x.to_string()).collect())
+                        .unwrap_or_else(Vec::new);
+                    let importance = it.next().flatten().unwrap_or_default();
+                    let chain_id = it.next().flatten().unwrap_or_default();
+                    let thought_id = it.next().flatten().unwrap_or_default();
+                    let ts = it
+                        .next()
+                        .and_then(|s| s.and_then(|x| x.parse::<i64>().ok()))
+                        .unwrap_or_default();
                     all_items.push(MemoryItem {
                         key: keys[i].clone(),
-                        content: m.get("content").cloned().unwrap_or_default(),
-                        tags: m
-                            .get("tags")
-                            .map(|s| s.split(',').map(|x| x.to_string()).collect())
-                            .unwrap_or_default(),
-                        importance: m.get("importance").cloned().unwrap_or_default(),
-                        chain_id: m.get("chain_id").cloned().unwrap_or_default(),
-                        thought_id: m.get("thought_id").cloned().unwrap_or_default(),
-                        ts: m.get("ts").and_then(|s| s.parse().ok()).unwrap_or_default(),
+                        content,
+                        tags,
+                        importance,
+                        chain_id,
+                        thought_id,
+                        ts,
                         score: None,
                     });
                 }
@@ -283,32 +328,46 @@ pub async fn ui_memory_impl(
                 });
             }
 
+            let fields = [
+                "content",
+                "tags",
+                "importance",
+                "chain_id",
+                "thought_id",
+                "ts",
+            ];
             let mut pipe = redis::pipe();
             for key in &keys {
-                pipe.hgetall(key);
+                pipe.cmd("HMGET").arg(key).arg(&fields);
             }
-            let results: Vec<HashMap<String, String>> = pipe.query_async(&mut *con).await?;
+            let rows: Vec<Vec<Option<String>>> = pipe.query_async(&mut *con).await?;
 
             let mut memory_items = Vec::new();
-            for (i, data) in results.iter().enumerate() {
-                if !data.is_empty() {
-                    memory_items.push(MemoryItem {
-                        key: keys[i].clone(),
-                        content: data.get("content").cloned().unwrap_or_default(),
-                        tags: data
-                            .get("tags")
-                            .map(|s| s.split(',').map(String::from).collect())
-                            .unwrap_or_default(),
-                        importance: data.get("importance").cloned().unwrap_or_default(),
-                        chain_id: data.get("chain_id").cloned().unwrap_or_default(),
-                        thought_id: data.get("thought_id").cloned().unwrap_or_default(),
-                        ts: data
-                            .get("ts")
-                            .and_then(|s| s.parse().ok())
-                            .unwrap_or_default(),
-                        score: None,
-                    });
-                }
+            for (i, row) in rows.into_iter().enumerate() {
+                let mut it = row.into_iter();
+                let content = it.next().flatten().unwrap_or_default();
+                let tags: Vec<String> = it
+                    .next()
+                    .flatten()
+                    .map(|s| s.split(',').map(String::from).collect())
+                    .unwrap_or_default();
+                let importance = it.next().flatten().unwrap_or_default();
+                let chain_id = it.next().flatten().unwrap_or_default();
+                let thought_id = it.next().flatten().unwrap_or_default();
+                let ts = it
+                    .next()
+                    .and_then(|s| s.and_then(|x| x.parse::<i64>().ok()))
+                    .unwrap_or_default();
+                memory_items.push(MemoryItem {
+                    key: keys[i].clone(),
+                    content,
+                    tags,
+                    importance,
+                    chain_id,
+                    thought_id,
+                    ts,
+                    score: None,
+                });
             }
             Ok(UiMemoryResult {
                 results: Some(memory_items),

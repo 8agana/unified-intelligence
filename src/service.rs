@@ -167,6 +167,29 @@ impl UnifiedIntelligenceService {
             ));
         }
 
+        if params.0.mode == "help" {
+            let help = serde_json::json!({
+                "tool": "ui_recall",
+                "usage": {
+                    "mode": "thought|chain|help",
+                    "id": "string (thought_id or chain_id)"
+                },
+                "examples": [
+                    {"mode": "thought", "id": "<thought_id>"},
+                    {"mode": "chain", "id": "<chain_id>"},
+                    {"mode": "help", "id": "ignored"}
+                ],
+                "troubleshooting": [
+                    "Ensure the ID exists in the current instance namespace",
+                    "Use ui_help for a list of tools and high-level guidance"
+                ]
+            });
+            let content = Content::json(help).map_err(|e| {
+                ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+            })?;
+            return Ok(CallToolResult::success(vec![content]));
+        }
+
         match self.handlers.recall.recall(params.0).await {
             Ok(response) => {
                 let content = Content::json(response).map_err(|e| {
@@ -219,6 +242,27 @@ impl UnifiedIntelligenceService {
                 "Rate limit exceeded. Please slow down your requests.".to_string(),
                 None,
             ));
+        }
+
+        if params.0.mode == "help" {
+            let help = serde_json::json!({
+                "tool": "ui_knowledge",
+                "usage": {
+                    "mode": "create|search|set_active|get_entity|create_relation|get_relations|update_entity|delete_entity|help",
+                    "common": ["entity_id?", "scope?"],
+                    "create/update": ["name?", "display_name?", "entity_type?", "attributes?", "tags?"],
+                    "search": ["query?", "limit?"],
+                    "relations": ["from_entity_id?", "to_entity_id?", "relationship_type?", "bidirectional?", "weight?"],
+                },
+                "troubleshooting": [
+                    "Use scope Federation or Personal appropriately",
+                    "Ensure entity names are unique within scope"
+                ]
+            });
+            let content = Content::json(help).map_err(|e| {
+                ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+            })?;
+            return Ok(CallToolResult::success(vec![content]));
         }
 
         match self.handlers.ui_knowledge(params.0).await {
@@ -307,8 +351,33 @@ impl UnifiedIntelligenceService {
             ));
         }
 
-        // 0) If there is a prior assistant synthesis in this chain, update its feedback from current user behavior
+        // 0) Help mode
         let p = params.0;
+        if matches!(p.action.as_deref(), Some("help")) {
+            let help = serde_json::json!({
+                "tool": "ui_remember",
+                "usage": {
+                    "action?": "help",
+                    "thought": "string",
+                    "thought_number": "integer",
+                    "total_thoughts": "integer",
+                    "chain_id?": "string",
+                    "style?": "string (e.g., deep|chronological)",
+                    "tags?": "string[]"
+                },
+                "flow": "T1 user thought -> T2 synthesized assistant -> T3 metrics and feedback hash",
+                "troubleshooting": [
+                    "Ensure RediSearch indices exist for hybrid retrieval",
+                    "Set OPENAI_API_KEY and GROQ_API_KEY"
+                ]
+            });
+            let content = Content::json(help).map_err(|e| {
+                ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+            })?;
+            return Ok(CallToolResult::success(vec![content]));
+        }
+
+        // 1) If there is a prior assistant synthesis in this chain, update its feedback from current user behavior
         if let Some(ref chain_id) = p.chain_id {
             if let Ok(chain_thoughts) = self
                 .handlers
@@ -348,7 +417,7 @@ impl UnifiedIntelligenceService {
             }
         }
 
-        // 1) Store Thought 1 (user query)
+        // 2) Store Thought 1 (user query)
         let t1 = crate::models::ThoughtRecord::new(
             self.instance_id.clone(),
             p.thought.clone(),
@@ -368,7 +437,7 @@ impl UnifiedIntelligenceService {
             return Err(ErrorData::internal_error(e.to_string(), None));
         }
 
-        // 2) Retrieval: text search over thoughts + embedding KNN over memory indices
+        // 3) Retrieval: text search over thoughts + embedding KNN over memory indices
         let retrieved = match self
             .handlers
             .repository

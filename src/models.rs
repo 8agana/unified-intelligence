@@ -364,9 +364,9 @@ pub struct RelationMetadata {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UiKnowledgeParams {
     #[schemars(
-        description = "Operation mode: create, search, set_active, get_entity, create_relation, get_relations, update_entity, delete_entity",
+        description = "Operation mode: create, search, set_active, get_entity, create_relation, get_relations, update_entity, delete_entity, help",
         regex(
-            pattern = r"^(create|search|set_active|get_entity|create_relation|get_relations|update_entity|delete_entity)$"
+            pattern = r"^(create|search|set_active|get_entity|create_relation|get_relations|update_entity|delete_entity|help)$"
         )
     )]
     pub mode: String,

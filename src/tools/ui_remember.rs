@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UiRememberParams {
+    #[serde(default)]
+    pub action: Option<String>,
     pub thought: String,
     pub thought_number: i32,
     pub total_thoughts: i32,

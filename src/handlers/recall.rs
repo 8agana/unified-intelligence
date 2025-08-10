@@ -7,7 +7,7 @@ use tracing::{info, warn};
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UiRecallParams {
-    #[schemars(regex(pattern = r"^(thought|chain)$"))]
+    #[schemars(regex(pattern = r"^(thought|chain|help)$"))]
     pub mode: String,
     pub id: String,
 }
