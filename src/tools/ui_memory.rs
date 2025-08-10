@@ -200,24 +200,34 @@ pub async fn ui_memory_impl(
             }
             if let Some(f) = params.filters.as_ref() {
                 if !f.tags.is_empty() {
-                    if !query.is_empty() { query.push(' '); }
+                    if !query.is_empty() {
+                        query.push(' ');
+                    }
                     let tags = f.tags.join("|");
                     query.push_str(&format!("@tags:{{{tags}}}"));
                 }
                 if let Some(imp) = &f.importance {
-                    if !query.is_empty() { query.push(' '); }
+                    if !query.is_empty() {
+                        query.push(' ');
+                    }
                     query.push_str(&format!("@importance:{imp}"));
                 }
                 if let Some(cid) = &f.chain_id {
-                    if !query.is_empty() { query.push(' '); }
+                    if !query.is_empty() {
+                        query.push(' ');
+                    }
                     query.push_str(&format!("@chain_id:{cid}"));
                 }
                 if let Some(tid) = &f.thought_id {
-                    if !query.is_empty() { query.push(' '); }
+                    if !query.is_empty() {
+                        query.push(' ');
+                    }
                     query.push_str(&format!("@thought_id:{tid}"));
                 }
             }
-            if query.is_empty() { query.push('*'); }
+            if query.is_empty() {
+                query.push('*');
+            }
 
             let mut all_items: Vec<MemoryItem> = Vec::new();
             for idx in indexes {
@@ -225,21 +235,32 @@ pub async fn ui_memory_impl(
                     .arg(&idx)
                     .arg(&query)
                     .arg("NOCONTENT")
-                    .arg("LIMIT").arg(options.offset).arg(options.limit)
+                    .arg("LIMIT")
+                    .arg(options.offset)
+                    .arg(options.limit)
                     .query_async(&mut *con)
                     .await?;
                 let keys = extract_doc_ids(&res);
-                if keys.is_empty() { continue; }
+                if keys.is_empty() {
+                    continue;
+                }
 
                 let mut pipe = redis::pipe();
-                for k in &keys { pipe.hgetall(k); }
+                for k in &keys {
+                    pipe.hgetall(k);
+                }
                 let maps: Vec<HashMap<String, String>> = pipe.query_async(&mut *con).await?;
                 for (i, m) in maps.into_iter().enumerate() {
-                    if m.is_empty() { continue; }
-                    all_items.push(MemoryItem{
+                    if m.is_empty() {
+                        continue;
+                    }
+                    all_items.push(MemoryItem {
                         key: keys[i].clone(),
                         content: m.get("content").cloned().unwrap_or_default(),
-                        tags: m.get("tags").map(|s| s.split(',').map(|x| x.to_string()).collect()).unwrap_or_default(),
+                        tags: m
+                            .get("tags")
+                            .map(|s| s.split(',').map(|x| x.to_string()).collect())
+                            .unwrap_or_default(),
                         importance: m.get("importance").cloned().unwrap_or_default(),
                         chain_id: m.get("chain_id").cloned().unwrap_or_default(),
                         thought_id: m.get("thought_id").cloned().unwrap_or_default(),
@@ -248,7 +269,10 @@ pub async fn ui_memory_impl(
                     });
                 }
             }
-            Ok(UiMemoryResult { results: Some(all_items), ..Default::default() })
+            Ok(UiMemoryResult {
+                results: Some(all_items),
+                ..Default::default()
+            })
         }
         "read" => {
             let keys = params.targets.context("Missing targets for read")?.keys;
