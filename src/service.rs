@@ -327,61 +327,14 @@ impl UnifiedIntelligenceService {
                     let now = chrono::Utc::now();
                     let delta = (now - prev_ts).num_seconds().max(0);
 
-                    let lc = p.thought.to_lowercase();
-                    let corrected = [
-                        "actually",
-                        "no,",
-                        "that's not",
-                        "incorrect",
-                        "correction",
-                        "wrong",
-                        "not true",
-                        "should be",
-                    ]
-                    .iter()
-                    .any(|s| lc.contains(s));
-
-                    let positive_ack = [
-                        "thanks",
-                        "thank you",
-                        "got it",
-                        "great",
-                        "perfect",
-                        "that works",
-                        "awesome",
-                        "nice",
-                    ]
-                    .iter()
-                    .any(|s| lc.contains(s));
-
-                    // Base score from responsiveness
-                    let mut score = if corrected {
-                        0.3
-                    } else if delta < 30 {
-                        0.9
-                    } else if delta < 120 {
-                        0.7
-                    } else {
-                        0.5
-                    };
-
-                    // Adjust for positive acknowledgments
-                    if positive_ack {
-                        score = (score + 0.1f64).min(1.0f64);
-                    }
-                    // Slight penalty if clear correction
-                    if corrected {
-                        score = (score - 0.1f64).max(0.0f64);
-                    }
-
-                    // Opportunistic abandon marking: if no follow-up for >= 10 minutes
-                    let abandoned = if delta >= 600 { 1 } else { 0 };
+                    let (score, abandoned, continued, corrected) =
+                        compute_feedback_scoring(delta, &p.thought);
 
                     if let Ok(mut con) = self.handlers.redis_manager.get_connection().await {
                         let key = format!("voice:feedback:{}", prev_assistant.id);
                         let corrected_text = if corrected { &p.thought } else { "" };
                         let _: () = redis::pipe()
-                            .hset(&key, "continued", 1)
+                            .hset(&key, "continued", continued)
                             .hset(&key, "time_to_next", delta)
                             .hset(&key, "corrected", corrected_text)
                             .hset(&key, "synthesis_quality", score)
@@ -433,7 +386,8 @@ impl UnifiedIntelligenceService {
         };
 
         // Embedding KNN across memory indexes
-        let mut knn_items: Vec<(String, String, i64)> = Vec::new(); // (key, content, ts)
+        // (key, optional_distance_score, content, ts)
+        let mut knn_items: Vec<(String, Option<f64>, String, i64)> = Vec::new();
         if let Ok(openai_key) = std::env::var("OPENAI_API_KEY") {
             if let Ok(embedding) =
                 generate_openai_embedding(&p.thought, &openai_key, &self.handlers.redis_manager)
@@ -462,18 +416,19 @@ impl UnifiedIntelligenceService {
                                 .arg("SORTBY")
                                 .arg("score")
                                 .arg("RETURN")
-                                .arg(0)
+                                .arg(1)
+                                .arg("score")
                                 .arg("DIALECT")
                                 .arg(2)
                                 .query_async(&mut *con)
                                 .await
                                 .unwrap_or(redis::Value::Nil);
-                            let keys = extract_doc_ids(&val);
-                            if keys.is_empty() {
+                            let keys_scores = extract_doc_ids_and_scores(&val);
+                            if keys_scores.is_empty() {
                                 continue;
                             }
                             let mut pipe = redis::pipe();
-                            for k in &keys {
+                            for (k, _) in &keys_scores {
                                 pipe.hgetall(k);
                             }
                             let maps: Vec<std::collections::HashMap<String, String>> =
@@ -487,7 +442,8 @@ impl UnifiedIntelligenceService {
                                     .get("ts")
                                     .and_then(|s| s.parse::<i64>().ok())
                                     .unwrap_or_default();
-                                knn_items.push((keys[i].clone(), content, ts));
+                                let (key, score_opt) = &keys_scores[i];
+                                knn_items.push((key.clone(), *score_opt, content, ts));
                             }
                         }
                     }
@@ -500,7 +456,7 @@ impl UnifiedIntelligenceService {
         let avg_age_secs: i64 = if knn_count > 0 {
             let sum: i64 = knn_items
                 .iter()
-                .map(|(_, _, ts)| (now_ts - *ts).max(0))
+                .map(|(_, _, _, ts)| (now_ts - *ts).max(0))
                 .sum();
             sum / (knn_count as i64)
         } else {
@@ -520,6 +476,11 @@ impl UnifiedIntelligenceService {
 
         let mut cands: Vec<Cand> = Vec::new();
 
+        // Pull weights from config
+        let w_sem = self.config.ui_remember.hybrid_weights.semantic;
+        let w_text = self.config.ui_remember.hybrid_weights.text;
+        let w_rec = self.config.ui_remember.hybrid_weights.recency;
+
         // Text hits -> text=1.0, semantic=0.0
         for r in &retrieved {
             let id = match uuid::Uuid::parse_str(&r.id) {
@@ -532,7 +493,7 @@ impl UnifiedIntelligenceService {
             let text_score = 1.0f64;
             let semantic_score = 0.0f64;
             let rec = recency(&ts);
-            let combined = 0.6 * semantic_score + 0.25 * text_score + 0.15 * rec;
+            let combined = w_sem * semantic_score + w_text * text_score + w_rec * rec;
             cands.push(Cand {
                 thought: crate::models::Thought {
                     id,
@@ -552,14 +513,15 @@ impl UnifiedIntelligenceService {
                 combined,
             });
         }
-        // KNN items -> semantic=1.0, text=0.0
-        for (_key, content, ts) in &knn_items {
+        // KNN items -> semantic based on distance score, text=0.0
+        for (_key, score_opt, content, ts) in &knn_items {
             let id = uuid::Uuid::new_v4();
             let tsdt = chrono::DateTime::from_timestamp(*ts, 0).unwrap_or_else(chrono::Utc::now);
             let text_score = 0.0f64;
-            let semantic_score = 1.0f64; // placeholder until we extract actual distance
+            // Convert RediSearch vector score (distance; lower is better) to similarity in 0..1
+            let semantic_score = score_opt.map(|d| 1.0f64 / (1.0f64 + d)).unwrap_or(0.5f64);
             let rec = recency(&tsdt);
-            let combined = 0.6 * semantic_score + 0.25 * text_score + 0.15 * rec;
+            let combined = w_sem * semantic_score + w_text * text_score + w_rec * rec;
             cands.push(Cand {
                 thought: crate::models::Thought {
                     id,
@@ -694,26 +656,118 @@ impl UnifiedIntelligenceService {
     }
 }
 
-// Minimal extractor for FT.SEARCH NOCONTENT responses
-fn extract_doc_ids(val: &redis::Value) -> Vec<String> {
+// Extract doc ids and optional score from FT.SEARCH responses
+fn extract_doc_ids_and_scores(val: &redis::Value) -> Vec<(String, Option<f64>)> {
     let mut out = Vec::new();
     match val {
         redis::Value::Array(items) if !items.is_empty() => {
-            for item in items.iter().skip(1) {
-                match item {
+            let mut i = 1usize; // skip total count
+            while i < items.len() {
+                // Expect id first
+                let id_opt = match &items[i] {
                     redis::Value::BulkString(bytes) => {
-                        if let Ok(s) = std::str::from_utf8(bytes) {
-                            out.push(s.to_string());
-                        }
+                        std::str::from_utf8(bytes).ok().map(|s| s.to_string())
                     }
-                    redis::Value::SimpleString(s) => out.push(s.clone()),
-                    _ => {}
+                    redis::Value::SimpleString(s) => Some(s.clone()),
+                    _ => None,
+                };
+                i += 1;
+                if id_opt.is_none() {
+                    continue;
+                }
+                let mut score_opt: Option<f64> = None;
+                // Next may be an array of field-value pairs
+                if i < items.len() {
+                    if let redis::Value::Array(fields) = &items[i] {
+                        let mut j = 0usize;
+                        while j + 1 < fields.len() {
+                            let k = &fields[j];
+                            let v = &fields[j + 1];
+                            let key_is_score = match k {
+                                redis::Value::BulkString(b) => std::str::from_utf8(b)
+                                    .ok()
+                                    .map(|s| s == "score")
+                                    .unwrap_or(false),
+                                redis::Value::SimpleString(s) => s == "score",
+                                _ => false,
+                            };
+                            if key_is_score {
+                                if let Some(num) = match v {
+                                    redis::Value::BulkString(b) => std::str::from_utf8(b)
+                                        .ok()
+                                        .and_then(|s| s.parse::<f64>().ok()),
+                                    redis::Value::SimpleString(s) => s.parse::<f64>().ok(),
+                                    redis::Value::Int(i) => Some(*i as f64),
+                                    _ => None,
+                                } {
+                                    score_opt = Some(num);
+                                    break;
+                                }
+                            }
+                            j += 2;
+                        }
+                        i += 1;
+                    }
+                }
+                if let Some(id) = id_opt {
+                    out.push((id, score_opt));
                 }
             }
         }
         _ => {}
     }
     out
+}
+
+// Helper for computing feedback metrics heuristics
+fn compute_feedback_scoring(delta_secs: i64, user_text: &str) -> (f64, i32, i32, bool) {
+    let lc = user_text.to_lowercase();
+    let corrected = [
+        "actually",
+        "no,",
+        "that's not",
+        "incorrect",
+        "correction",
+        "wrong",
+        "not true",
+        "should be",
+    ]
+    .iter()
+    .any(|s| lc.contains(s));
+
+    let positive_ack = [
+        "thanks",
+        "thank you",
+        "got it",
+        "great",
+        "perfect",
+        "that works",
+        "awesome",
+        "nice",
+    ]
+    .iter()
+    .any(|s| lc.contains(s));
+
+    let mut score = if corrected {
+        0.3
+    } else if delta_secs < 30 {
+        0.9
+    } else if delta_secs < 120 {
+        0.7
+    } else {
+        0.5
+    };
+
+    if positive_ack {
+        score = (score + 0.1f64).min(1.0f64);
+    }
+    if corrected {
+        score = (score - 0.1f64).max(0.0f64);
+    }
+
+    let abandoned = if delta_secs >= 600 { 1 } else { 0 };
+    let continued = 1; // this helper is used only when we see a follow-up
+    (score, abandoned, continued, corrected)
 }
 
 #[tool_handler]
@@ -733,5 +787,85 @@ impl ServerHandler for UnifiedIntelligenceService {
                 "UnifiedIntelligence MCP Server for Redis-backed thought storage".into(),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_doc_ids_and_scores_with_scores() {
+        let val = redis::Value::Array(vec![
+            redis::Value::Int(2),
+            redis::Value::BulkString(b"doc:1".to_vec()),
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"score".to_vec()),
+                redis::Value::BulkString(b"0.123".to_vec()),
+            ]),
+            redis::Value::BulkString(b"doc:2".to_vec()),
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"score".to_vec()),
+                redis::Value::BulkString(b"0.456".to_vec()),
+            ]),
+        ]);
+
+        let out = extract_doc_ids_and_scores(&val);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].0, "doc:1");
+        assert!((out[0].1.unwrap() - 0.123).abs() < 1e-9);
+        assert_eq!(out[1].0, "doc:2");
+        assert!((out[1].1.unwrap() - 0.456).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_extract_doc_ids_and_scores_nocontent() {
+        let val = redis::Value::Array(vec![
+            redis::Value::Int(2),
+            redis::Value::BulkString(b"doc:1".to_vec()),
+            redis::Value::BulkString(b"doc:2".to_vec()),
+        ]);
+        let out = extract_doc_ids_and_scores(&val);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].0, "doc:1");
+        assert!(out[0].1.is_none());
+        assert_eq!(out[1].0, "doc:2");
+        assert!(out[1].1.is_none());
+    }
+
+    #[test]
+    fn test_compute_feedback_scoring_thresholds() {
+        // Fast continuation, positive ack
+        let (s1, a1, c1, corr1) = compute_feedback_scoring(10, "Thanks, that works");
+        assert!(s1 >= 0.9 && s1 <= 1.0);
+        assert_eq!(a1, 0);
+        assert_eq!(c1, 1);
+        assert!(!corr1);
+
+        // Normal continuation
+        let (s2, a2, c2, corr2) = compute_feedback_scoring(60, "okay");
+        assert!((s2 - 0.7).abs() < 1e-9);
+        assert_eq!(a2, 0);
+        assert_eq!(c2, 1);
+        assert!(!corr2);
+
+        // Slow continuation
+        let (s3, a3, c3, corr3) = compute_feedback_scoring(180, "following up");
+        assert!((s3 - 0.5).abs() < 1e-9);
+        assert_eq!(a3, 0);
+        assert_eq!(c3, 1);
+        assert!(!corr3);
+
+        // Correction case
+        let (s4, a4, c4, corr4) = compute_feedback_scoring(20, "Actually, that's not correct");
+        assert!(s4 <= 0.3);
+        assert_eq!(a4, 0);
+        assert_eq!(c4, 1);
+        assert!(corr4);
+
+        // Abandoned threshold (helper always marks continued=1; abandon detection handled elsewhere by elapsed time)
+        let (s5, a5, _c5, _corr5) = compute_feedback_scoring(1200, "");
+        assert_eq!(a5, 1);
+        assert!(s5 <= 0.5);
     }
 }

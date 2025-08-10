@@ -26,9 +26,10 @@
 Unified Intelligence is a Rust-based Model Context Protocol (MCP) server designed to enhance cognitive capabilities by processing and synthesizing thoughts using various thinking frameworks. It integrates with external services like Groq for advanced language model capabilities, OpenAI for embeddings, and Qdrant for vector-based memory storage and retrieval. This project aims to provide a robust and extensible backend for intelligent agents and applications.
 
 ## Features
-- **Thinking Frameworks:** Implements various cognitive frameworks (OODA, Socratic, First Principles, Systems, Root Cause, SWOT, Remember, DeepRemember) to guide thought processing.
+- **Thinking Frameworks:** Implements various cognitive frameworks (OODA, Socratic, First Principles, Systems, Root Cause, SWOT, Remember) to guide thought processing.
 - **Groq Integration:** Leverages Groq's powerful language models for natural language understanding, search query parsing, and intelligent response synthesis from retrieved memories.
-- **Vector Memory (Qdrant):** Utilizes Qdrant as a high-performance vector database for storing and retrieving contextual memories based on semantic similarity.
+- **Conversational Memory (Redis-only):** `ui_remember` stores and retrieves all memory in Redis, performing hybrid retrieval (text + KNN via RediSearch) and recording objective feedback metrics.
+- **Vector Memory (Qdrant):** Qdrant integration remains available for other features, but `ui_remember` operates Redis-only by design.
 - **Embeddings (OpenAI):** Generates vector embeddings for thoughts and queries using OpenAI's embedding models, enabling semantic search.
 - **Redis Persistence:** Stores thought records, chain metadata, and feedback loop metadata in Redis for efficient data management.
 - **Extensible Design:** Modular architecture allows for easy extension with new frameworks, integrations, and functionalities.
@@ -90,6 +91,37 @@ Unified Intelligence relies on environment variables for configuration:
 - `REDIS_HOST`: Host for your Redis instance (default: `localhost`).
 - `REDIS_PORT`: Port for your Redis instance (default: `6379`).
 - `QDRANT_SIMILARITY_THRESHOLD`: (Optional) Threshold for Qdrant search results (default: `0.35`).
+  
+For `ui_remember` hybrid retrieval, you can tune weights via config/env (see sections below).
+
+## Security & Checks
+
+- Local checks:
+  - `cargo fmt --all -- --check`
+  - `cargo clippy -- -D warnings`
+  - `cargo test`
+  - `cargo audit` (optional; install with `cargo install cargo-audit`)
+  - Optionally `cargo deny check` if you have a `deny.toml`
+
+- CI: See `.github/workflows/security.yml`, which runs fmt, clippy, tests, and non-blocking `cargo audit`/`cargo deny`.
+
+## Env & ui_remember Overrides
+
+Copy `.env.example` to `.env` and set:
+
+```
+GROQ_API_KEY=…
+OPENAI_API_KEY=…
+INSTANCE_ID=CC
+
+# ui_remember: preset overrides weights when set
+UI_REMEMBER_PRESET=balanced-default
+UI_REMEMBER_WEIGHT_SEMANTIC=0.6
+UI_REMEMBER_WEIGHT_TEXT=0.25
+UI_REMEMBER_WEIGHT_RECENCY=0.15
+```
+
+More details in `docs/ui_remember_config.md` including available presets and precedence.
 
 ## Usage
 Unified Intelligence operates as an MCP server. You can interact with it using an MCP client (e.g., Claude Desktop, or a custom client built with `rmcp`).

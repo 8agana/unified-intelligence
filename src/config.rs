@@ -18,6 +18,7 @@ pub struct Config {
     pub groq: GroqConfig,
     pub openai: OpenAIConfig,
     pub redis_search: RedisSearchConfig,
+    pub ui_remember: UiRememberConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +136,8 @@ impl Config {
 
         // Apply environment variable overrides
         config.apply_env_overrides();
+        // Apply preset mapping last to ensure it overrides weights if provided
+        config.apply_ui_remember_preset();
 
         // Validate configuration
         config.validate()?;
@@ -231,6 +234,26 @@ impl Config {
         if let Ok(model_deep) = env::var("GROQ_MODEL_DEEP") {
             self.groq.model_deep = model_deep;
         }
+
+        // ui_remember hybrid weight overrides
+        if let Ok(w) = env::var("UI_REMEMBER_WEIGHT_SEMANTIC") {
+            if let Ok(v) = w.parse() {
+                self.ui_remember.hybrid_weights.semantic = v;
+            }
+        }
+        if let Ok(w) = env::var("UI_REMEMBER_WEIGHT_TEXT") {
+            if let Ok(v) = w.parse() {
+                self.ui_remember.hybrid_weights.text = v;
+            }
+        }
+        if let Ok(w) = env::var("UI_REMEMBER_WEIGHT_RECENCY") {
+            if let Ok(v) = w.parse() {
+                self.ui_remember.hybrid_weights.recency = v;
+            }
+        }
+        if let Ok(preset) = env::var("UI_REMEMBER_PRESET") {
+            self.ui_remember.preset = Some(preset);
+        }
     }
 
     /// Validate configuration
@@ -269,6 +292,21 @@ impl Config {
         // Validate Groq API key
         if self.groq.api_key == "PLACEHOLDER_GROQ_API_KEY" || self.groq.api_key.is_empty() {
             return Err("GROQ_API_KEY environment variable must be set".into());
+        }
+
+        // Validate ui_remember weights are sane (0..=1)
+        let w = self.ui_remember.hybrid_weights;
+        for (name, val) in [
+            ("semantic", w.semantic),
+            ("text", w.text),
+            ("recency", w.recency),
+        ] {
+            if !(0.0..=1.0).contains(&val) {
+                return Err(format!(
+                    "ui_remember.hybrid_weights.{name} must be between 0.0 and 1.0"
+                )
+                .into());
+            }
         }
 
         Ok(())
@@ -411,6 +449,116 @@ impl Default for Config {
                     ef_construction: 200,
                 },
             },
+            ui_remember: UiRememberConfig {
+                hybrid_weights: HybridWeights {
+                    semantic: 0.6,
+                    text: 0.25,
+                    recency: 0.15,
+                },
+                preset: None,
+            },
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiRememberConfig {
+    #[serde(default = "HybridWeights::default")]
+    pub hybrid_weights: HybridWeights,
+    #[serde(default)]
+    pub preset: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Copy)]
+pub struct HybridWeights {
+    pub semantic: f64,
+    pub text: f64,
+    pub recency: f64,
+}
+
+impl HybridWeights {
+    fn default() -> Self {
+        Self {
+            semantic: 0.6,
+            text: 0.25,
+            recency: 0.15,
+        }
+    }
+}
+
+impl Config {
+    fn apply_ui_remember_preset(&mut self) {
+        if let Some(ref preset_raw) = self.ui_remember.preset {
+            let preset = preset_raw.to_lowercase();
+            let w = match preset.as_str() {
+                // Prioritize speed and exact phrasing
+                "fast-chat" => HybridWeights {
+                    semantic: 0.45,
+                    text: 0.40,
+                    recency: 0.15,
+                },
+                // Prioritize semantic depth for synthesis
+                "deep-research" => HybridWeights {
+                    semantic: 0.75,
+                    text: 0.10,
+                    recency: 0.15,
+                },
+                // Emphasize most recent context
+                "recall-recent" => HybridWeights {
+                    semantic: 0.45,
+                    text: 0.15,
+                    recency: 0.40,
+                },
+                // Balanced default
+                "balanced-default" => HybridWeights::default(),
+                other => {
+                    tracing::warn!(
+                        "Unknown ui_remember preset: {}. Using existing weights.",
+                        other
+                    );
+                    return;
+                }
+            };
+            self.ui_remember.hybrid_weights = w;
+            tracing::info!(
+                "Applied ui_remember preset '{}': semantic={}, text={}, recency={}",
+                preset,
+                w.semantic,
+                w.text,
+                w.recency
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ui_remember_preset_mapping() {
+        let mut cfg = Config::default();
+        cfg.ui_remember.preset = Some("deep-research".to_string());
+        cfg.apply_ui_remember_preset();
+        let w = cfg.ui_remember.hybrid_weights;
+        assert!((w.semantic - 0.75).abs() < 1e-9);
+        assert!((w.text - 0.10).abs() < 1e-9);
+        assert!((w.recency - 0.15).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_ui_remember_preset_overrides_weights() {
+        let mut cfg = Config::default();
+        // Simulate prior weight overrides
+        cfg.ui_remember.hybrid_weights.semantic = 0.55;
+        cfg.ui_remember.hybrid_weights.text = 0.30;
+        cfg.ui_remember.hybrid_weights.recency = 0.15;
+        // Set preset and apply
+        cfg.ui_remember.preset = Some("fast-chat".to_string());
+        cfg.apply_ui_remember_preset();
+        let w = cfg.ui_remember.hybrid_weights;
+        assert!((w.semantic - 0.45).abs() < 1e-9);
+        assert!((w.text - 0.40).abs() < 1e-9);
+        assert!((w.recency - 0.15).abs() < 1e-9);
     }
 }
