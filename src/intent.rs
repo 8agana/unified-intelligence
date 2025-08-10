@@ -11,6 +11,7 @@ pub struct GroqIntent {
 }
 
 impl GroqIntent {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(tx: Arc<dyn Transport>, model: String) -> Self {
         Self { tx, model }
     }
@@ -18,6 +19,7 @@ impl GroqIntent {
 
 #[async_trait]
 pub trait IntentParser: Send + Sync {
+    #[cfg_attr(not(test), allow(dead_code))]
     async fn parse(&self, query: &str) -> Result<QueryIntent>;
 }
 

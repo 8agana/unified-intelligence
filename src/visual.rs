@@ -80,6 +80,7 @@ impl VisualOutput {
     }
 
     /// Display error messages
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn error(&self, message: &str) {
         eprintln!("   {} {}", "❌".red(), message.red());
     }

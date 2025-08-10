@@ -22,6 +22,7 @@ pub struct GroqTransport {
 }
 
 impl GroqTransport {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(api_key: String) -> Result<Self> {
         Ok(Self {
             client: Client::new(),

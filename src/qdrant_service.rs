@@ -19,6 +19,7 @@ use crate::models::Thought; // Assuming Thought struct is in crate::models
 use mockall::automock;
 
 #[cfg_attr(test, automock)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub trait QdrantServiceTrait: Send + Sync + 'static {
     fn search_memories<'a>(
         &'a self,

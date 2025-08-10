@@ -9,6 +9,7 @@ use tracing::{info, warn};
 use crate::error::UnifiedIntelligenceError;
 use crate::redis::RedisManager;
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn generate_openai_embedding(
     text: &str,
     openai_api_key: &str,

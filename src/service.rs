@@ -96,9 +96,7 @@ impl UnifiedIntelligenceService {
             repository,
             instance_id.clone(),
             validator,
-            redis_manager.clone(),  // Pass redis_manager
-            qdrant_service.clone(), // Pass qdrant_service
-            config.clone(),         // Pass config
+            redis_manager.clone(), // Pass redis_manager
         ));
         tracing::info!("Service::new() - ToolHandlers created");
 

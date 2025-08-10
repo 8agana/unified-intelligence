@@ -160,8 +160,6 @@ async fn create_test_handler() -> Option<ToolHandlers<MockCombinedMockRepository
         "test".to_string(),
         validator,
         redis_manager,
-        qdrant_service,
-        config,
     ))
 }
 

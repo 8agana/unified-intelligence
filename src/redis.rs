@@ -519,6 +519,7 @@ impl RedisManager {
     }
 
     /// Get a cached embedding from Redis
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn get_cached_embedding(&self, text: &str) -> Result<Option<Vec<f32>>> {
         let mut conn = self.get_connection().await?;
         let key = format!("embedding:{}", hex::encode(Sha256::digest(text))); // Use SHA256 hash of text as key
@@ -539,6 +540,7 @@ impl RedisManager {
     }
 
     /// Set a cached embedding in Redis with a TTL
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn set_cached_embedding(
         &self,
         text: &str,

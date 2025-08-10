@@ -12,6 +12,7 @@ pub struct GroqSynth {
 }
 
 impl GroqSynth {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(tx: Arc<dyn Transport>, model_fast: String, model_deep: String) -> Self {
         Self {
             tx,
@@ -23,6 +24,7 @@ impl GroqSynth {
 
 #[async_trait]
 pub trait Synthesizer: Send + Sync {
+    #[cfg_attr(not(test), allow(dead_code))]
     async fn synth(&self, intent: &QueryIntent, ctx: &[Thought]) -> Result<String>;
 }
 

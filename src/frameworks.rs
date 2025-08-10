@@ -26,7 +26,7 @@ pub enum FrameworkError {
 impl FrameworkError {
     /// Create an invalid framework error with the list of valid frameworks
     pub fn invalid_framework(name: &str) -> Self {
-        let valid_frameworks = "ooda, socratic, first_principles, systems, root_cause, swot, remember, deep-remember, deepremember";
+        let valid_frameworks = "ooda, socratic, first_principles, systems, root_cause, swot";
         Self::InvalidFramework {
             name: name.to_string(),
             valid_list: valid_frameworks.to_string(),
@@ -44,8 +44,6 @@ pub enum ThinkingFramework {
     Systems,         // Understand interconnections and patterns
     RootCause,       // Five Whys methodology
     SWOT,            // Strengths, Weaknesses, Opportunities, Threats
-    Remember,        // Groq-powered memory search (fast - llama3-8b)
-    DeepRemember,    // Groq-powered deep synthesis (heavy - llama3-70b)
 }
 
 impl fmt::Display for ThinkingFramework {
@@ -57,8 +55,6 @@ impl fmt::Display for ThinkingFramework {
             ThinkingFramework::Systems => write!(f, "systems"),
             ThinkingFramework::RootCause => write!(f, "root_cause"),
             ThinkingFramework::SWOT => write!(f, "swot"),
-            ThinkingFramework::Remember => write!(f, "remember"),
-            ThinkingFramework::DeepRemember => write!(f, "deepremember"),
         }
     }
 }
@@ -77,8 +73,6 @@ impl ThinkingFramework {
             "systems" => Ok(Self::Systems),
             "root_cause" => Ok(Self::RootCause),
             "swot" => Ok(Self::SWOT),
-            "remember" => Ok(Self::Remember),
-            "deep-remember" | "deep_remember" | "deepremember" => Ok(Self::DeepRemember),
             _ => Err(FrameworkError::invalid_framework(framework)),
         }
     }
@@ -97,8 +91,6 @@ impl ThinkingFramework {
             Self::Systems => "Systems Thinking",
             Self::RootCause => "Root Cause Analysis",
             Self::SWOT => "SWOT Analysis",
-            Self::Remember => "Remember Framework",
-            Self::DeepRemember => "Deep Remember Framework",
         }
     }
 
@@ -112,8 +104,6 @@ impl ThinkingFramework {
             Self::Systems => "Understand interconnections and patterns",
             Self::RootCause => "Five Whys root cause analysis",
             Self::SWOT => "Strengths, Weaknesses, Opportunities, Threats analysis",
-            Self::Remember => "Groq-powered memory search and retrieval (fast model)",
-            Self::DeepRemember => "Groq-powered deep synthesis and analysis (heavy model)",
         }
     }
 
@@ -127,8 +117,6 @@ impl ThinkingFramework {
             Self::Systems => "bright_cyan",
             Self::RootCause => "bright_red",
             Self::SWOT => "bright_orange",
-            Self::Remember => "purple",
-            Self::DeepRemember => "bright_purple",
         }
     }
 }
@@ -152,8 +140,6 @@ impl FrameworkProcessor {
             ThinkingFramework::Systems => self.process_systems(thought),
             ThinkingFramework::RootCause => self.process_root_cause(thought, thought_number),
             ThinkingFramework::SWOT => self.process_swot(thought),
-            ThinkingFramework::Remember => self.process_remember(thought),
-            ThinkingFramework::DeepRemember => self.process_deep_remember(thought),
         }
     }
 
@@ -296,38 +282,6 @@ impl FrameworkProcessor {
             })),
         }
     }
-
-    /// Remember framework - Groq-powered memory search
-    fn process_remember(&self, _thought: &str) -> FrameworkResult {
-        // This is a placeholder - actual Groq integration happens in the handler
-        FrameworkResult {
-            _framework: self.framework.clone(),
-            prompts: vec![],
-            insights: vec![
-                "Using Groq (fast model) to search memory and create follow-up thought".to_string(),
-            ],
-            _metadata: Some(serde_json::json!({
-                "method": "groq_search",
-                "model": "llama3-8b-8192",
-                "auto_thought_2": true
-            })),
-        }
-    }
-
-    /// Deep Remember framework - Groq-powered deep synthesis
-    fn process_deep_remember(&self, _thought: &str) -> FrameworkResult {
-        // This is a placeholder - actual Groq integration happens in the handler
-        FrameworkResult {
-            _framework: self.framework.clone(),
-            prompts: vec![],
-            insights: vec!["Using Groq (heavy model) for deep synthesis and analysis".to_string()],
-            _metadata: Some(serde_json::json!({
-                "method": "groq_deep_synthesis",
-                "model": "llama3-70b-8192",
-                "auto_thought_2": true
-            })),
-        }
-    }
 }
 
 /// Result of framework processing
@@ -352,8 +306,6 @@ impl FrameworkVisual {
             ThinkingFramework::Systems => "🌐",
             ThinkingFramework::RootCause => "🔍",
             ThinkingFramework::SWOT => "📊",
-            ThinkingFramework::Remember => "🔮",
-            ThinkingFramework::DeepRemember => "🌌",
         };
         eprintln!("   {} {}", icon, framework.name().bright_yellow());
     }
