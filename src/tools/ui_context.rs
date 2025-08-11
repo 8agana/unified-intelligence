@@ -17,11 +17,11 @@ use crate::config::Config;
 #[allow(dead_code)]
 pub struct UIContextParams {
     /// "session-summaries" | "important" | "federation" | "help"
-    #[serde(rename = "type")]
+    #[serde(rename = "type", alias = "action", alias = "mode")]
     pub kind: String,
 
     /// Required unless type == "help"
-    #[serde(default)]
+    #[serde(default, alias = "text", alias = "data")]
     pub content: String,
 
     #[serde(default)]
@@ -62,10 +62,19 @@ pub async fn ui_context_impl(
     redis_manager: &crate::redis::RedisManager,
     params: UIContextParams,
 ) -> Result<UIContextResult> {
-    let mode = params.kind.trim();
+    let mode_raw = params.kind.trim();
+    
+    // Normalize common variations
+    let mode = match mode_raw.to_lowercase().as_str() {
+        "help" => "help",
+        "session-summary" | "session-summaries" | "session" | "summary" => "session-summaries",
+        "important" | "priority" | "critical" => "important",
+        "federation" | "federated" | "team" | "shared" => "federation",
+        _ => mode_raw,
+    };
 
     // help (no external calls)
-    if mode.eq_ignore_ascii_case("help") {
+    if mode == "help" {
         return Ok(UIContextResult {
             mode: "help".into(),
             key: None,
@@ -80,8 +89,8 @@ pub async fn ui_context_impl(
     // only the three write modes are allowed
     ensure!(
         matches!(mode, "session-summaries" | "important" | "federation"),
-        "unsupported type: {} (expected: session-summaries|important|federation|help)",
-        mode
+        "unsupported type: {} (expected: session-summaries|important|federation|help). Did you mean one of these?",
+        mode_raw
     );
     ensure!(
         !params.content.is_empty(),
