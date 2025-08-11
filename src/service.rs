@@ -518,10 +518,13 @@ impl UnifiedIntelligenceService {
         // Embedding KNN across memory indexes
         // (key, optional_distance_score, content, ts)
         let mut knn_items: Vec<(String, Option<f64>, String, i64)> = Vec::new();
-        if let Ok(openai_key) = std::env::var("OPENAI_API_KEY") {
-            if let Ok(embedding) =
-                generate_openai_embedding(&p.thought, &openai_key, &self.handlers.redis_manager)
-                    .await
+        if let Ok(openai_key) = self.config.openai.api_key() {
+            if let Ok(embedding) = generate_openai_embedding(
+                &p.thought,
+                &openai_key,
+                &self.handlers.redis_manager,
+            )
+            .await
             {
                 let dims = self.config.openai.embedding_dimensions;
                 if embedding.len() == dims {
@@ -545,6 +548,9 @@ impl UnifiedIntelligenceService {
                                 .arg(vec_bytes.as_slice())
                                 .arg("SORTBY")
                                 .arg("score")
+                                .arg("LIMIT")
+                                .arg(0)
+                                .arg(5)
                                 .arg("RETURN")
                                 .arg(1)
                                 .arg("score")
@@ -579,6 +585,8 @@ impl UnifiedIntelligenceService {
                     }
                 }
             }
+        } else {
+            tracing::warn!("OPENAI_API_KEY not available; skipping KNN vector search for ui_remember");
         }
         let knn_count = knn_items.len();
         // Simple recency proxy: average age (seconds) of KNN items
@@ -778,6 +786,9 @@ impl UnifiedIntelligenceService {
             thought3_id: Some(thought3_id),
             model_used: Some(synthesized.model_used.clone()),
             usage_total_tokens: synthesized.usage.as_ref().and_then(|u| u.total_tokens),
+            assistant_text: Some(synthesized.text.clone()),
+            retrieved_text_count: Some(retrieved.len()),
+            retrieved_embedding_count: Some(knn_count),
         };
 
         let content = Content::json(result)

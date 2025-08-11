@@ -46,4 +46,10 @@ pub struct UiRememberResult {
     pub model_used: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_total_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assistant_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retrieved_text_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retrieved_embedding_count: Option<usize>,
 }
