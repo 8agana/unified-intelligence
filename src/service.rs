@@ -49,10 +49,7 @@ impl UnifiedIntelligenceService {
     ) -> Result<Self, UnifiedIntelligenceError> {
         tracing::info!("Service::new() - Starting initialization");
         // Load configuration
-        let config = Arc::new(Config::load().map_err(|e| {
-            tracing::error!("Service::new() - Failed to load config: {}", e);
-            UnifiedIntelligenceError::Config(format!("Failed to load config: {e}"))
-        })?);
+        let config = Arc::new(Config::load());
         tracing::info!("Service::new() - Configuration loaded");
 
         // Get instance ID from environment or config

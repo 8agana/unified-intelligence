@@ -1,8 +1,6 @@
 use anyhow::Result;
 use rmcp::{ServiceExt, transport::stdio};
 
-use crate::error::UnifiedIntelligenceError;
-
 mod circuit_breaker;
 mod config;
 mod embeddings; // New module
@@ -41,10 +39,7 @@ async fn main() -> Result<()> {
         .init();
 
     // Load configuration
-    let config = Arc::new(Config::load().map_err(|e| {
-        tracing::error!("main: Failed to load config: {}", e);
-        UnifiedIntelligenceError::Config(format!("Failed to load config: {e}"))
-    })?);
+    let config = Arc::new(Config::load());
 
     // Initialize RedisManager
     let redis_manager = Arc::new(RedisManager::new_with_config(&config).await?);

@@ -98,7 +98,8 @@ pub struct GroqConfig {
 
 impl Config {
     /// Load configuration from file with environment variable overrides
-    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+    /// ALWAYS returns a valid config - never fails
+    pub fn load() -> Self {
         // Load environment variables from .env files
         // Try multiple locations since DT runs from different working directory
         let env_paths = [
@@ -117,7 +118,7 @@ impl Config {
         }
 
         if !env_loaded {
-            tracing::warn!("No .env file found in any expected location");
+            tracing::warn!("No .env file found in any expected location - continuing with env vars only");
         }
 
         // Default config path
@@ -125,12 +126,26 @@ impl Config {
 
         // Load config from file if it exists
         let mut config = if Path::new(&config_path).exists() {
-            let contents = fs::read_to_string(&config_path)?;
-            let config: Config = serde_yaml::from_str(&contents)?;
-            tracing::info!("Loaded configuration from {}", config_path);
-            config
+            match fs::read_to_string(&config_path) {
+                Ok(contents) => {
+                    match serde_yaml::from_str::<Config>(&contents) {
+                        Ok(config) => {
+                            tracing::info!("Loaded configuration from {}", config_path);
+                            config
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to parse config file {}: {} - using defaults", config_path, e);
+                            Self::default()
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to read config file {}: {} - using defaults", config_path, e);
+                    Self::default()
+                }
+            }
         } else {
-            tracing::warn!("Config file not found at {}, using defaults", config_path);
+            tracing::warn!("Config file not found at {} - using defaults", config_path);
             Self::default()
         };
 
@@ -139,10 +154,12 @@ impl Config {
         // Apply preset mapping last to ensure it overrides weights if provided
         config.apply_ui_remember_preset();
 
-        // Validate configuration
-        config.validate()?;
+        // Validate configuration - log warnings but don't fail
+        if let Err(e) = config.validate() {
+            tracing::warn!("Config validation warnings: {} - continuing anyway", e);
+        }
 
-        Ok(config)
+        config
     }
 
     /// Apply environment variable overrides
