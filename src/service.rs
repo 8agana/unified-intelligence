@@ -563,23 +563,27 @@ impl UnifiedIntelligenceService {
                             if keys_scores.is_empty() {
                                 continue;
                             }
+                            // Use HMGET to fetch only text fields, avoiding binary vector field
+                            let fields = ["content", "ts"];
                             let mut pipe = redis::pipe();
                             for (k, _) in &keys_scores {
-                                pipe.hgetall(k);
+                                pipe.cmd("HMGET").arg(k).arg(&fields);
                             }
-                            let maps: Vec<std::collections::HashMap<String, String>> =
-                                pipe.query_async(&mut *con).await.unwrap_or_default();
-                            for (i, m) in maps.into_iter().enumerate() {
-                                if m.is_empty() {
-                                    continue;
+                            let rows: Vec<Vec<Option<String>>> = pipe.query_async(&mut *con).await.unwrap_or_default();
+                            for (i, row) in rows.into_iter().enumerate() {
+                                if i >= keys_scores.len() {
+                                    break;
                                 }
-                                let content = m.get("content").cloned().unwrap_or_default();
-                                let ts = m
-                                    .get("ts")
-                                    .and_then(|s| s.parse::<i64>().ok())
+                                let mut it = row.into_iter();
+                                let content = it.next().flatten().unwrap_or_default();
+                                let ts = it
+                                    .next()
+                                    .and_then(|s| s.and_then(|x| x.parse::<i64>().ok()))
                                     .unwrap_or_default();
-                                let (key, score_opt) = &keys_scores[i];
-                                knn_items.push((key.clone(), *score_opt, content, ts));
+                                if !content.is_empty() {
+                                    let (key, score_opt) = &keys_scores[i];
+                                    knn_items.push((key.clone(), *score_opt, content, ts));
+                                }
                             }
                         }
                     }
