@@ -19,7 +19,7 @@ qdrant:
   port: 6334
   timeout_seconds: 30
   collection_name: unified_thoughts
-  similarity_threshold: 0.7
+  similarity_threshold: 0.35
 
 rate_limiter:
   max_requests: 100
@@ -98,3 +98,10 @@ openai:
   api_key: ${OPENAI_API_KEY}
   embedding_model: text-embedding-3-small
   embedding_dimensions: 1536
+
+ui_remember:
+  preset: balanced-default
+  hybrid_weights:
+    semantic: 0.6
+    text: 0.25
+    recency: 0.15

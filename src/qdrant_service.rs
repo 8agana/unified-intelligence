@@ -5,13 +5,30 @@ use qdrant_client::qdrant::point_id::PointIdOptions;
 use qdrant_client::qdrant::{
     Condition, Filter, PointId, Range, SearchParams, SearchPoints, Value, WithPayloadSelector,
 };
+use std::boxed::Box;
 use std::collections::HashMap;
 use std::env;
+use std::pin::Pin;
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::error::UnifiedIntelligenceError;
 use crate::models::Thought; // Assuming Thought struct is in crate::models
+
+#[cfg(test)]
+use mockall::automock;
+
+#[cfg_attr(test, automock)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub trait QdrantServiceTrait: Send + Sync + 'static {
+    fn search_memories<'a>(
+        &'a self,
+        query_embedding: Vec<f32>,
+        top_k: u64,
+        score_threshold: Option<f32>,
+        temporal_filter: Option<crate::models::TemporalFilter>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<Thought>>> + Send + 'a>>;
+}
 
 #[derive(Clone)]
 pub struct QdrantService {
@@ -28,21 +45,21 @@ impl QdrantService {
             .map_err(|_| UnifiedIntelligenceError::EnvVar("Invalid QDRANT_PORT".to_string()))?;
 
         info!("Connecting to Qdrant at {}:{}", qdrant_host, qdrant_port);
-        
+
         // Disable version check to prevent stdout output that breaks MCP protocol
         // The client prints "Failed to obtain server version" to stdout otherwise
-        let client = Qdrant::from_url(&format!("http://{}:{}", qdrant_host, qdrant_port))
+        let client = Qdrant::from_url(&format!("http://{qdrant_host}:{qdrant_port}"))
             .timeout(std::time::Duration::from_secs(5))
             .skip_compatibility_check()
             .build()
             .map_err(|e| {
-                UnifiedIntelligenceError::Config(format!("Failed to create Qdrant client: {}", e))
+                UnifiedIntelligenceError::Config(format!("Failed to create Qdrant client: {e}"))
             })?;
 
         Ok(Self { client })
     }
 
-    pub async fn search_memories(
+    async fn search_memories_internal(
         &self,
         query_embedding: Vec<f32>,
         top_k: u64,
@@ -54,7 +71,7 @@ impl QdrantService {
             query_embedding.len(),
             top_k,
             if let Some(threshold) = score_threshold {
-                format!(" (threshold: {})", threshold)
+                format!(" (threshold: {threshold})")
             } else {
                 "".to_string()
             }
@@ -71,16 +88,13 @@ impl QdrantService {
             if let Some(start_date_str) = temp_filter.start_date {
                 // Parse ISO 8601 date string
                 if let Ok(start_dt) = chrono::DateTime::parse_from_rfc3339(&start_date_str) {
-                    conditions.push(
-                        Condition::range(
-                            "processed_at_timestamp".to_string(),
-                            Range {
-                                gte: Some(start_dt.timestamp() as f64),
-                                ..Default::default()
-                            },
-                        )
-                        .into(),
-                    );
+                    conditions.push(Condition::range(
+                        "processed_at_timestamp".to_string(),
+                        Range {
+                            gte: Some(start_dt.timestamp() as f64),
+                            ..Default::default()
+                        },
+                    ));
                 } else {
                     warn!("Failed to parse start_date: {}", start_date_str);
                 }
@@ -89,16 +103,13 @@ impl QdrantService {
             if let Some(end_date_str) = temp_filter.end_date {
                 // Parse ISO 8601 date string
                 if let Ok(end_dt) = chrono::DateTime::parse_from_rfc3339(&end_date_str) {
-                    conditions.push(
-                        Condition::range(
-                            "processed_at_timestamp".to_string(),
-                            Range {
-                                lte: Some(end_dt.timestamp() as f64),
-                                ..Default::default()
-                            },
-                        )
-                        .into(),
-                    );
+                    conditions.push(Condition::range(
+                        "processed_at_timestamp".to_string(),
+                        Range {
+                            lte: Some(end_dt.timestamp() as f64),
+                            ..Default::default()
+                        },
+                    ));
                 } else {
                     warn!("Failed to parse end_date: {}", end_date_str);
                 }
@@ -200,17 +211,14 @@ impl QdrantService {
 
                 // Only add condition if we have a valid time range
                 if start_dt != end_dt {
-                    conditions.push(
-                        Condition::range(
-                            "processed_at_timestamp".to_string(),
-                            Range {
-                                gte: Some(start_dt.timestamp() as f64),
-                                lte: Some(end_dt.timestamp() as f64),
-                                ..Default::default()
-                            },
-                        )
-                        .into(),
-                    );
+                    conditions.push(Condition::range(
+                        "processed_at_timestamp".to_string(),
+                        Range {
+                            gte: Some(start_dt.timestamp() as f64),
+                            lte: Some(end_dt.timestamp() as f64),
+                            ..Default::default()
+                        },
+                    ));
                 }
             }
 
@@ -399,6 +407,23 @@ impl QdrantService {
             usage_score: None,                    // Will be calculated later if needed
             combined_score: None,                 // Will be calculated later if needed
         })
+    }
+}
+
+impl QdrantServiceTrait for QdrantService {
+    fn search_memories<'a>(
+        &'a self,
+        query_embedding: Vec<f32>,
+        top_k: u64,
+        score_threshold: Option<f32>,
+        temporal_filter: Option<crate::models::TemporalFilter>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<Thought>>> + Send + 'a>> {
+        Box::pin(self.search_memories_internal(
+            query_embedding,
+            top_k,
+            score_threshold,
+            temporal_filter,
+        ))
     }
 }
 

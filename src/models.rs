@@ -17,6 +17,18 @@ fn default_tags() -> Option<Vec<String>> {
     Some(vec![])
 }
 
+fn default_thought_number() -> i32 {
+    1
+}
+
+fn default_total_thoughts() -> i32 {
+    1
+}
+
+fn default_next_thought_needed() -> bool {
+    false
+}
+
 /// Flexible integer deserializer to handle string, float, or int inputs from different MCP clients
 fn deserialize_flexible_int<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
 where
@@ -59,6 +71,22 @@ where
     }
 }
 
+/// Flexible integer deserializer with default for thought_number
+fn deserialize_thought_number<'de, D>(deserializer: D) -> Result<i32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_flexible_int_required(deserializer)
+}
+
+/// Flexible integer deserializer with default for total_thoughts
+fn deserialize_total_thoughts<'de, D>(deserializer: D) -> Result<i32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_flexible_int_required(deserializer)
+}
+
 /// Parameters for the ui_think tool
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UiThinkParams {
@@ -66,14 +94,15 @@ pub struct UiThinkParams {
     pub thought: String,
 
     #[schemars(description = "Current thought number in sequence")]
-    #[serde(deserialize_with = "deserialize_flexible_int_required")]
+    #[serde(deserialize_with = "deserialize_thought_number", default = "default_thought_number")]
     pub thought_number: i32,
 
     #[schemars(description = "Total number of thoughts in sequence")]
-    #[serde(deserialize_with = "deserialize_flexible_int_required")]
+    #[serde(deserialize_with = "deserialize_total_thoughts", default = "default_total_thoughts")]
     pub total_thoughts: i32,
 
     #[schemars(description = "Whether another thought is needed")]
+    #[serde(default = "default_next_thought_needed")]
     pub next_thought_needed: bool,
 
     #[schemars(description = "Optional chain ID to link thoughts together")]
@@ -238,11 +267,27 @@ pub struct GroqRequest {
 #[derive(Debug, Deserialize)]
 pub struct GroqResponse {
     pub choices: Vec<Choice>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub usage: Option<GroqUsage>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Choice {
     pub message: ChatMessage,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct GroqUsage {
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub prompt_tokens: Option<i32>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub completion_tokens: Option<i32>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub total_tokens: Option<i32>,
 }
 
 // RecallMode enum and UiRecallParams moved to handlers/recall.rs with string-based mode
@@ -253,8 +298,8 @@ pub struct Choice {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum KnowledgeScope {
-    Federation,  // Default for work-related entities
-    Personal,    // Instance-specific context
+    Federation, // Default for work-related entities
+    Personal,   // Instance-specific context
 }
 
 impl Default for KnowledgeScope {
@@ -294,7 +339,7 @@ impl std::fmt::Display for EntityType {
             Self::Concept => write!(f, "concept"),
             Self::Tool => write!(f, "tool"),
             Self::Framework => write!(f, "framework"),
-            Self::Custom(s) => write!(f, "{}", s),
+            Self::Custom(s) => write!(f, "{s}"),
         }
     }
 }
@@ -347,15 +392,20 @@ pub struct RelationMetadata {
 /// Parameters for ui_knowledge tool - flattened structure for CC compatibility
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UiKnowledgeParams {
-    #[schemars(description = "Operation mode: create, search, set_active, get_entity, create_relation, get_relations, update_entity, delete_entity", regex(pattern = r"^(create|search|set_active|get_entity|create_relation|get_relations|update_entity|delete_entity)$"))]
+    #[schemars(
+        description = "Operation mode: create, search, set_active, get_entity, create_relation, get_relations, update_entity, delete_entity, help",
+        regex(
+            pattern = r"^(create|search|set_active|get_entity|create_relation|get_relations|update_entity|delete_entity|help)$"
+        )
+    )]
     pub mode: String,
-    
+
     // Common fields
     #[serde(default)]
     pub entity_id: Option<String>,
     #[serde(default)]
     pub scope: Option<KnowledgeScope>,
-    
+
     // For create/update
     #[serde(default)]
     pub name: Option<String>,
@@ -367,13 +417,13 @@ pub struct UiKnowledgeParams {
     pub attributes: Option<std::collections::HashMap<String, serde_json::Value>>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
-    
+
     // For search
     #[serde(default)]
     pub query: Option<String>,
     #[serde(default)]
     pub limit: Option<usize>,
-    
+
     // For relations
     #[serde(default)]
     pub from_entity_id: Option<String>,
@@ -387,7 +437,6 @@ pub struct UiKnowledgeParams {
     pub weight: Option<f32>,
 }
 
-
 /// Response from knowledge operations
 #[derive(Debug, Serialize)]
 pub struct KnowledgeResponse {
@@ -400,6 +449,7 @@ pub struct KnowledgeResponse {
 
 impl KnowledgeScope {
     /// Determine appropriate scope based on context
+    #[allow(dead_code)]
     pub fn from_context(entity_type: &EntityType, instance: &str) -> Self {
         match entity_type {
             EntityType::Issue | EntityType::System | EntityType::Tool => {

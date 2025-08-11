@@ -6,22 +6,28 @@ use rmcp::{
 use rmcp_macros::{tool, tool_handler, tool_router};
 use std::future::Future;
 use std::sync::Arc;
-use tracing;
 
 use crate::config::Config;
+use crate::embeddings::generate_openai_embedding;
 use crate::error::UnifiedIntelligenceError;
+use crate::handlers::ToolHandlers;
 use crate::handlers::help::{HelpHandlerTrait, UiHelpParams};
 use crate::handlers::knowledge::KnowledgeHandler;
 use crate::handlers::recall::UiRecallParams;
 use crate::handlers::thoughts::ThoughtsHandler;
-use crate::handlers::ToolHandlers;
-use crate::models::UiThinkParams;
 use crate::models::UiKnowledgeParams;
-use crate::qdrant_service::QdrantService;
+use crate::models::UiThinkParams;
+use crate::qdrant_service::QdrantServiceTrait;
 use crate::rate_limit::RateLimiter;
 use crate::redis::RedisManager;
 use crate::repository::CombinedRedisRepository;
+use crate::repository_traits::ThoughtRepository;
+use crate::synth::Synthesizer;
+use crate::tools::ui_context::{UIContextParams, ui_context_impl};
+use crate::tools::ui_memory::{UiMemoryParams, ui_memory_impl};
+use crate::tools::ui_remember::{UiRememberParams, UiRememberResult};
 use crate::validation::InputValidator;
+use bytemuck::cast_slice;
 
 /// Main service struct for UnifiedIntelligence MCP server
 #[derive(Clone)]
@@ -31,21 +37,19 @@ pub struct UnifiedIntelligenceService {
     rate_limiter: Arc<RateLimiter>,
     instance_id: String,
     config: Arc<Config>,
-    qdrant_service: QdrantService,
+    #[allow(dead_code)]
+    qdrant_service: Arc<dyn QdrantServiceTrait>,
 }
 
 impl UnifiedIntelligenceService {
     /// Create a new service instance
     pub async fn new(
         redis_manager: Arc<RedisManager>,
-        qdrant_service: QdrantService,
+        qdrant_service: Arc<dyn QdrantServiceTrait>,
     ) -> Result<Self, UnifiedIntelligenceError> {
         tracing::info!("Service::new() - Starting initialization");
         // Load configuration
-        let config = Arc::new(Config::load().map_err(|e| {
-            tracing::error!("Service::new() - Failed to load config: {}", e);
-            UnifiedIntelligenceError::Config(format!("Failed to load config: {}", e))
-        })?);
+        let config = Arc::new(Config::load());
         tracing::info!("Service::new() - Configuration loaded");
 
         // Get instance ID from environment or config
@@ -94,9 +98,7 @@ impl UnifiedIntelligenceService {
             repository,
             instance_id.clone(),
             validator,
-            redis_manager.clone(),  // Pass redis_manager
-            qdrant_service.clone(), // Pass qdrant_service
-            config.clone(),         // Pass config
+            redis_manager.clone(), // Pass redis_manager
         ));
         tracing::info!("Service::new() - ToolHandlers created");
 
@@ -123,7 +125,7 @@ impl UnifiedIntelligenceService {
         if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
             tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
             return Err(ErrorData::invalid_params(
-                format!("Rate limit exceeded. Please slow down your requests."),
+                "Rate limit exceeded. Please slow down your requests.".to_string(),
                 None,
             ));
         }
@@ -131,7 +133,7 @@ impl UnifiedIntelligenceService {
         match self.handlers.ui_think(params.0).await {
             Ok(response) => {
                 let content = Content::json(response).map_err(|e| {
-                    ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None)
+                    ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
                 })?;
                 Ok(CallToolResult::success(vec![content]))
             }
@@ -157,22 +159,45 @@ impl UnifiedIntelligenceService {
         if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
             tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
             return Err(ErrorData::invalid_params(
-                format!("Rate limit exceeded. Please slow down your requests."),
+                "Rate limit exceeded. Please slow down your requests.".to_string(),
                 None,
             ));
+        }
+
+        if params.0.mode == "help" {
+            let help = serde_json::json!({
+                "tool": "ui_recall",
+                "usage": {
+                    "mode": "thought|chain|help",
+                    "id": "string (thought_id or chain_id)"
+                },
+                "examples": [
+                    {"mode": "thought", "id": "<thought_id>"},
+                    {"mode": "chain", "id": "<chain_id>"},
+                    {"mode": "help", "id": "ignored"}
+                ],
+                "troubleshooting": [
+                    "Ensure the ID exists in the current instance namespace",
+                    "Use ui_help for a list of tools and high-level guidance"
+                ]
+            });
+            let content = Content::json(help).map_err(|e| {
+                ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+            })?;
+            return Ok(CallToolResult::success(vec![content]));
         }
 
         match self.handlers.recall.recall(params.0).await {
             Ok(response) => {
                 let content = Content::json(response).map_err(|e| {
-                    ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None)
+                    ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
                 })?;
                 Ok(CallToolResult::success(vec![content]))
             }
             Err(e) => {
                 tracing::error!("ui_recall error: {}", e);
                 Err(ErrorData::internal_error(
-                    format!("Error recalling thought: {}", e),
+                    format!("Error recalling thought: {e}"),
                     None,
                 ))
             }
@@ -188,14 +213,14 @@ impl UnifiedIntelligenceService {
         match self.handlers.ui_help(params.0).await {
             Ok(response) => {
                 let content = Content::json(response).map_err(|e| {
-                    ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None)
+                    ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
                 })?;
                 Ok(CallToolResult::success(vec![content]))
             }
             Err(e) => {
                 tracing::error!("ui_help error: {}", e);
                 Err(ErrorData::internal_error(
-                    format!("Error generating help: {}", e),
+                    format!("Error generating help: {e}"),
                     None,
                 ))
             }
@@ -211,15 +236,36 @@ impl UnifiedIntelligenceService {
         if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
             tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
             return Err(ErrorData::invalid_params(
-                format!("Rate limit exceeded. Please slow down your requests."),
+                "Rate limit exceeded. Please slow down your requests.".to_string(),
                 None,
             ));
+        }
+
+        if params.0.mode == "help" {
+            let help = serde_json::json!({
+                "tool": "ui_knowledge",
+                "usage": {
+                    "mode": "create|search|set_active|get_entity|create_relation|get_relations|update_entity|delete_entity|help",
+                    "common": ["entity_id?", "scope?"],
+                    "create/update": ["name?", "display_name?", "entity_type?", "attributes?", "tags?"],
+                    "search": ["query?", "limit?"],
+                    "relations": ["from_entity_id?", "to_entity_id?", "relationship_type?", "bidirectional?", "weight?"],
+                },
+                "troubleshooting": [
+                    "Use scope Federation or Personal appropriately",
+                    "Ensure entity names are unique within scope"
+                ]
+            });
+            let content = Content::json(help).map_err(|e| {
+                ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+            })?;
+            return Ok(CallToolResult::success(vec![content]));
         }
 
         match self.handlers.ui_knowledge(params.0).await {
             Ok(response) => {
                 let content = Content::json(response).map_err(|e| {
-                    ErrorData::internal_error(format!("Failed to create JSON content: {}", e), None)
+                    ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
                 })?;
                 Ok(CallToolResult::success(vec![content]))
             }
@@ -229,6 +275,641 @@ impl UnifiedIntelligenceService {
             }
         }
     }
+
+    #[tool(
+        description = "Store UI context (session-summaries|important|federation) or return help"
+    )]
+    pub async fn ui_context(
+        &self,
+        params: Parameters<UIContextParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        // Rate limit similar to other tools
+        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
+            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
+            return Err(ErrorData::invalid_params(
+                "Rate limit exceeded. Please slow down your requests.",
+                None,
+            ));
+        }
+
+        // Standardized help for ui_context
+        if params.0.kind.eq_ignore_ascii_case("help") {
+            let help = serde_json::json!({
+                "tool": "ui_context",
+                "usage": {
+                    "type": "session-summaries|important|federation|help",
+                    "content?": "string (required unless type=help)",
+                    "tags?": "string[]",
+                    "importance?": "string",
+                    "chain_id?": "string",
+                    "thought_id?": "string",
+                    "instance_id?": "string",
+                    "ttl_seconds?": "number"
+                },
+                "examples": [
+                    {"type": "session-summaries", "content": "..."},
+                    {"type": "important", "content": "...", "tags": ["project", "priority"]},
+                    {"type": "help"}
+                ],
+                "troubleshooting": [
+                    "Ensure RediSearch indices are created or allow tool to create them",
+                    "OPENAI_API_KEY must be set for embeddings",
+                    "INSTANCE_ID controls personal index namespace"
+                ]
+            });
+            let content = Content::json(help).map_err(|e| {
+                ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+            })?;
+            return Ok(CallToolResult::success(vec![content]));
+        }
+
+        let result = ui_context_impl(&self.config, &self.handlers.redis_manager, params.0)
+            .await
+            .map_err(|e| {
+                tracing::error!("ui_context error: {}", e);
+                ErrorData::internal_error(e.to_string(), None)
+            })?;
+
+        let content = Content::json(result).map_err(|e| {
+            ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+        })?;
+
+        Ok(CallToolResult::success(vec![content]))
+    }
+
+    #[tool(description = "Search/read/update/delete memory across embeddings with simple filters")]
+    pub async fn ui_memory(
+        &self,
+        params: Parameters<UiMemoryParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
+            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
+            return Err(ErrorData::invalid_params(
+                "Rate limit exceeded. Please slow down your requests.".to_string(),
+                None,
+            ));
+        }
+
+        // Standardized help for ui_memory
+        if params.0.action.eq_ignore_ascii_case("help") {
+            let help = serde_json::json!({
+                "tool": "ui_memory",
+                "usage": {
+                    "action": "search|read|update|delete|help",
+                    "query?": "string",
+                    "scope?": "all|session-summaries|important|federation",
+                    "filters?": {"tags?": "string[]", "importance?": "string", "chain_id?": "string", "thought_id?": "string"},
+                    "options?": {"limit?": "number", "offset?": "number", "k?": "number", "search_type?": "string"},
+                    "targets?": {"keys?": "string[]"},
+                    "update?": {"content?": "string", "tags?": "string[]", "importance?": "string", "chain_id?": "string", "thought_id?": "string", "ttl_seconds?": "number"}
+                },
+                "examples": [
+                    {"action": "search", "query": "vector db", "scope": "all"},
+                    {"action": "read", "targets": {"keys": ["CC:embeddings:important:abc123"]}},
+                    {"action": "help"}
+                ],
+                "troubleshooting": [
+                    "UTF-8 errors: avoids binary 'vector' field using HMGET for text fields",
+                    "Empty results: confirm indices and scope",
+                    "Set OPENAI_API_KEY for re-embedding on update"
+                ]
+            });
+            let content = Content::json(help).map_err(|e| {
+                ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+            })?;
+            return Ok(CallToolResult::success(vec![content]));
+        }
+
+        match ui_memory_impl(&self.config, &self.handlers.redis_manager, params.0).await {
+            Ok(response) => {
+                let content = Content::json(response).map_err(|e| {
+                    ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+                })?;
+                Ok(CallToolResult::success(vec![content]))
+            }
+            Err(e) => {
+                tracing::error!("ui_memory error: {}", e);
+                Err(ErrorData::internal_error(e.to_string(), None))
+            }
+        }
+    }
+
+    #[tool(
+        description = "Conversational memory: store user query, synthesize response, Redis-only"
+    )]
+    pub async fn ui_remember(
+        &self,
+        params: Parameters<UiRememberParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
+            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
+            return Err(ErrorData::invalid_params(
+                "Rate limit exceeded. Please slow down your requests.".to_string(),
+                None,
+            ));
+        }
+
+        // 0) Help mode
+        let p = params.0;
+        if matches!(p.action.as_deref(), Some("help")) {
+            let help = serde_json::json!({
+                "tool": "ui_remember",
+                "usage": {
+                    "action?": "help",
+                    "thought": "string",
+                    "thought_number": "integer",
+                    "total_thoughts": "integer",
+                    "chain_id?": "string",
+                    "style?": "string (e.g., deep|chronological)",
+                    "tags?": "string[]"
+                },
+                "flow": "T1 user thought -> T2 synthesized assistant -> T3 metrics and feedback hash",
+                "troubleshooting": [
+                    "Ensure RediSearch indices exist for hybrid retrieval",
+                    "Set OPENAI_API_KEY and GROQ_API_KEY"
+                ]
+            });
+            let content = Content::json(help).map_err(|e| {
+                ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
+            })?;
+            return Ok(CallToolResult::success(vec![content]));
+        }
+
+        // 1) If there is a prior assistant synthesis in this chain, update its feedback from current user behavior
+        if let Some(ref chain_id) = p.chain_id {
+            if let Ok(chain_thoughts) = self
+                .handlers
+                .repository
+                .get_chain_thoughts(&self.instance_id, chain_id)
+                .await
+            {
+                if let Some(prev_assistant) = chain_thoughts
+                    .iter()
+                    .filter(|t| t.category.as_deref() == Some("ui_remember:assistant"))
+                    .max_by_key(|t| t.timestamp.clone())
+                {
+                    let prev_ts = chrono::DateTime::parse_from_rfc3339(&prev_assistant.timestamp)
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .unwrap_or_else(|_| chrono::Utc::now());
+                    let now = chrono::Utc::now();
+                    let delta = (now - prev_ts).num_seconds().max(0);
+
+                    let (score, abandoned, continued, corrected) =
+                        compute_feedback_scoring(delta, &p.thought);
+
+                    if let Ok(mut con) = self.handlers.redis_manager.get_connection().await {
+                        let key = format!("voice:feedback:{}", prev_assistant.id);
+                        let corrected_text = if corrected { &p.thought } else { "" };
+                        let _: () = redis::pipe()
+                            .hset(&key, "continued", continued)
+                            .hset(&key, "time_to_next", delta)
+                            .hset(&key, "corrected", corrected_text)
+                            .hset(&key, "synthesis_quality", score)
+                            .hset(&key, "feedback_score", score)
+                            .hset(&key, "abandoned", abandoned)
+                            .query_async(&mut *con)
+                            .await
+                            .unwrap_or(());
+                    }
+                }
+            }
+        }
+
+        // 2) Store Thought 1 (user query)
+        let t1 = crate::models::ThoughtRecord::new(
+            self.instance_id.clone(),
+            p.thought.clone(),
+            p.thought_number,
+            p.total_thoughts,
+            p.chain_id.clone(),
+            true, // we know we'll produce at least one more thought
+            Some("ui_remember".to_string()),
+            None,
+            None,
+            p.tags.clone(),
+            Some("ui_remember:user".to_string()),
+        );
+        let thought1_id = t1.id.clone();
+        if let Err(e) = self.handlers.repository.save_thought(&t1).await {
+            tracing::error!("ui_remember: failed to save T1: {}", e);
+            return Err(ErrorData::internal_error(e.to_string(), None));
+        }
+
+        // 3) Retrieval: text search over thoughts + embedding KNN over memory indices
+        let retrieved = match self
+            .handlers
+            .repository
+            .search_thoughts(&self.instance_id, &p.thought, 0, 5)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    "ui_remember: retrieval failed, continuing without context: {}",
+                    e
+                );
+                Vec::new()
+            }
+        };
+
+        // Embedding KNN across memory indexes
+        // (key, optional_distance_score, content, ts)
+        let mut knn_items: Vec<(String, Option<f64>, String, i64)> = Vec::new();
+        if let Ok(openai_key) = self.config.openai.api_key() {
+            if let Ok(embedding) = generate_openai_embedding(
+                &p.thought,
+                &openai_key,
+                &self.handlers.redis_manager,
+            )
+            .await
+            {
+                let dims = self.config.openai.embedding_dimensions;
+                if embedding.len() == dims {
+                    let vec_bytes: Vec<u8> = cast_slice(&embedding).to_vec();
+                    let instance_id = &self.instance_id;
+                    let indexes = vec![
+                        format!("idx:{instance_id}:session-summaries"),
+                        format!("idx:{instance_id}:important"),
+                        "idx:Federation:embeddings".to_string(),
+                    ];
+                    if let Ok(mut con) = self.handlers.redis_manager.get_connection().await {
+                        for idx in indexes {
+                            let val: redis::Value = redis::cmd("FT.SEARCH")
+                                .arg(&idx)
+                                .arg("*=>[KNN $k @vector $vec AS score]")
+                                .arg("PARAMS")
+                                .arg(4)
+                                .arg("k")
+                                .arg(5)
+                                .arg("vec")
+                                .arg(vec_bytes.as_slice())
+                                .arg("SORTBY")
+                                .arg("score")
+                                .arg("LIMIT")
+                                .arg(0)
+                                .arg(5)
+                                .arg("RETURN")
+                                .arg(1)
+                                .arg("score")
+                                .arg("DIALECT")
+                                .arg(2)
+                                .query_async(&mut *con)
+                                .await
+                                .unwrap_or(redis::Value::Nil);
+                            let keys_scores = extract_doc_ids_and_scores(&val);
+                            if keys_scores.is_empty() {
+                                continue;
+                            }
+                            // Use HMGET to fetch only text fields, avoiding binary vector field
+                            let fields = ["content", "ts"];
+                            let mut pipe = redis::pipe();
+                            for (k, _) in &keys_scores {
+                                pipe.cmd("HMGET").arg(k).arg(&fields);
+                            }
+                            let rows: Vec<Vec<Option<String>>> = pipe.query_async(&mut *con).await.unwrap_or_default();
+                            for (i, row) in rows.into_iter().enumerate() {
+                                if i >= keys_scores.len() {
+                                    break;
+                                }
+                                let mut it = row.into_iter();
+                                let content = it.next().flatten().unwrap_or_default();
+                                let ts = it
+                                    .next()
+                                    .and_then(|s| s.and_then(|x| x.parse::<i64>().ok()))
+                                    .unwrap_or_default();
+                                if !content.is_empty() {
+                                    let (key, score_opt) = &keys_scores[i];
+                                    knn_items.push((key.clone(), *score_opt, content, ts));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            tracing::warn!("OPENAI_API_KEY not available; skipping KNN vector search for ui_remember");
+        }
+        let knn_count = knn_items.len();
+        // Simple recency proxy: average age (seconds) of KNN items
+        let now_ts = chrono::Utc::now().timestamp();
+        let avg_age_secs: i64 = if knn_count > 0 {
+            let sum: i64 = knn_items
+                .iter()
+                .map(|(_, _, _, ts)| (now_ts - *ts).max(0))
+                .sum();
+            sum / (knn_count as i64)
+        } else {
+            0
+        };
+
+        // Build candidate set with simple hybrid scoring (semantic/text/recency)
+        struct Cand {
+            thought: crate::models::Thought,
+            combined: f64,
+        }
+        let tau_secs: f64 = 86_400.0; // 1 day decay constant for recency
+        let recency = |t: &chrono::DateTime<chrono::Utc>| -> f64 {
+            let age = (chrono::Utc::now() - *t).num_seconds().max(0) as f64;
+            (-age / tau_secs).exp()
+        };
+
+        let mut cands: Vec<Cand> = Vec::new();
+
+        // Pull weights from config
+        let w_sem = self.config.ui_remember.hybrid_weights.semantic;
+        let w_text = self.config.ui_remember.hybrid_weights.text;
+        let w_rec = self.config.ui_remember.hybrid_weights.recency;
+
+        // Text hits -> text=1.0, semantic=0.0
+        for r in &retrieved {
+            let id = match uuid::Uuid::parse_str(&r.id) {
+                Ok(u) => u,
+                Err(_) => uuid::Uuid::new_v4(),
+            };
+            let ts = chrono::DateTime::parse_from_rfc3339(&r.timestamp)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .unwrap_or_else(|_| chrono::Utc::now());
+            let text_score = 1.0f64;
+            let semantic_score = 0.0f64;
+            let rec = recency(&ts);
+            let combined = w_sem * semantic_score + w_text * text_score + w_rec * rec;
+            cands.push(Cand {
+                thought: crate::models::Thought {
+                    id,
+                    content: r.content.clone(),
+                    category: r.category.clone(),
+                    tags: r.tags.clone().unwrap_or_default(),
+                    instance_id: r.instance.clone(),
+                    created_at: ts,
+                    updated_at: ts,
+                    importance: r.importance.unwrap_or(5),
+                    relevance: r.relevance.unwrap_or(5),
+                    semantic_score: None,
+                    temporal_score: None,
+                    usage_score: None,
+                    combined_score: None,
+                },
+                combined,
+            });
+        }
+        // KNN items -> semantic based on distance score, text=0.0
+        for (_key, score_opt, content, ts) in &knn_items {
+            let id = uuid::Uuid::new_v4();
+            let tsdt = chrono::DateTime::from_timestamp(*ts, 0).unwrap_or_else(chrono::Utc::now);
+            let text_score = 0.0f64;
+            // Convert RediSearch vector score (distance; lower is better) to similarity in 0..1
+            let semantic_score = score_opt.map(|d| 1.0f64 / (1.0f64 + d)).unwrap_or(0.5f64);
+            let rec = recency(&tsdt);
+            let combined = w_sem * semantic_score + w_text * text_score + w_rec * rec;
+            cands.push(Cand {
+                thought: crate::models::Thought {
+                    id,
+                    content: content.clone(),
+                    category: None,
+                    tags: vec![],
+                    instance_id: self.instance_id.clone(),
+                    created_at: tsdt,
+                    updated_at: tsdt,
+                    importance: 5,
+                    relevance: 5,
+                    semantic_score: None,
+                    temporal_score: None,
+                    usage_score: None,
+                    combined_score: None,
+                },
+                combined,
+            });
+        }
+
+        // Sort candidates and cap to top_k (default 5)
+        let top_k_used: usize = p.top_k.map(|v| v as usize).unwrap_or(5);
+        cands.sort_by(|a, b| {
+            b.combined
+                .partial_cmp(&a.combined)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let ctx_thoughts: Vec<crate::models::Thought> = cands
+            .into_iter()
+            .take(top_k_used)
+            .map(|c| c.thought)
+            .collect();
+
+        // 3) Build intent and synthesize via Groq
+        let intent = crate::models::QueryIntent {
+            original_query: p.thought.clone(),
+            temporal_filter: None,
+            synthesis_style: p.style.clone(),
+        };
+
+        let groq_api_key = self.config.groq.api_key.clone();
+        let tx = match crate::transport::GroqTransport::new(groq_api_key) {
+            Ok(v) => std::sync::Arc::new(v) as std::sync::Arc<dyn crate::transport::Transport>,
+            Err(e) => return Err(ErrorData::internal_error(e.to_string(), None)),
+        };
+        let synth = crate::synth::GroqSynth::new(
+            tx,
+            self.config.groq.model_fast.clone(),
+            self.config.groq.model_deep.clone(),
+        );
+
+        let start = std::time::Instant::now();
+        let synthesized = match synth.synth(&intent, &ctx_thoughts).await {
+            Ok(s) => s,
+            Err(e) => return Err(ErrorData::internal_error(e.to_string(), None)),
+        };
+        let _latency_ms = start.elapsed().as_millis() as i64;
+
+        // 4) Store Thought 2 (assistant synthesis)
+        let t2 = crate::models::ThoughtRecord::new(
+            self.instance_id.clone(),
+            synthesized.text.clone(),
+            p.thought_number + 1,
+            p.total_thoughts.max(2),
+            p.chain_id.clone(),
+            true, // a later metrics/feedback thought or next user thought
+            Some("ui_remember".to_string()),
+            None,
+            None,
+            p.tags.clone(),
+            Some("ui_remember:assistant".to_string()),
+        );
+        let thought2_id = t2.id.clone();
+        if let Err(e) = self.handlers.repository.save_thought(&t2).await {
+            tracing::error!("ui_remember: failed to save T2: {}", e);
+            return Err(ErrorData::internal_error(e.to_string(), None));
+        }
+
+        // 5) Store Thought 3 (system metrics note) and seed feedback hash for T2
+        let metrics_text = format!(
+            "[ui_remember:metrics]\\nretrieved_text={}\\nretrieved_embedding={}\\navg_age_secs={}\\nlatency_ms={}\\nmodel={}\\ntop_k_used={}",
+            retrieved.len(),
+            knn_count,
+            avg_age_secs,
+            _latency_ms,
+            synthesized.model_used.clone(),
+            top_k_used
+        );
+        let t3 = crate::models::ThoughtRecord::new(
+            self.instance_id.clone(),
+            metrics_text,
+            p.thought_number + 2,
+            p.total_thoughts.max(3),
+            p.chain_id.clone(),
+            true,
+            Some("ui_remember".to_string()),
+            None,
+            None,
+            p.tags.clone(),
+            Some("ui_remember:metrics".to_string()),
+        );
+        let thought3_id = t3.id.clone();
+        if let Err(e) = self.handlers.repository.save_thought(&t3).await {
+            tracing::warn!("ui_remember: failed to save T3 metrics note: {}", e);
+        }
+
+        // feedback hash: voice:feedback:{t2.id}
+        if let Ok(mut con) = self.handlers.redis_manager.get_connection().await {
+            let key = format!("voice:feedback:{thought2_id}");
+            let mut pipe = redis::pipe();
+            pipe.hset(&key, "synthesis_quality", 0.0f32)
+                .hset(&key, "continued", 0)
+                .hset(&key, "abandoned", 0)
+                .hset(&key, "corrected", "")
+                .hset(&key, "time_to_next", -1)
+                .hset(&key, "feedback_score", 0.0f32);
+            let _: () = pipe.query_async(&mut *con).await.unwrap_or(());
+        }
+
+        let result = UiRememberResult {
+            status: "ok".to_string(),
+            thought1_id,
+            thought2_id,
+            thought3_id: Some(thought3_id),
+            model_used: Some(synthesized.model_used.clone()),
+            usage_total_tokens: synthesized.usage.as_ref().and_then(|u| u.total_tokens),
+            assistant_text: Some(synthesized.text.clone()),
+            retrieved_text_count: Some(retrieved.len()),
+            retrieved_embedding_count: Some(knn_count),
+        };
+
+        let content = Content::json(result)
+            .map_err(|e| ErrorData::internal_error(format!("JSON encode error: {e}"), None))?;
+        Ok(CallToolResult::success(vec![content]))
+    }
+}
+
+// Extract doc ids and optional score from FT.SEARCH responses
+fn extract_doc_ids_and_scores(val: &redis::Value) -> Vec<(String, Option<f64>)> {
+    let mut out = Vec::new();
+    match val {
+        redis::Value::Array(items) if !items.is_empty() => {
+            let mut i = 1usize; // skip total count
+            while i < items.len() {
+                // Expect id first
+                let id_opt = match &items[i] {
+                    redis::Value::BulkString(bytes) => {
+                        std::str::from_utf8(bytes).ok().map(|s| s.to_string())
+                    }
+                    redis::Value::SimpleString(s) => Some(s.clone()),
+                    _ => None,
+                };
+                i += 1;
+                if id_opt.is_none() {
+                    continue;
+                }
+                let mut score_opt: Option<f64> = None;
+                // Next may be an array of field-value pairs
+                if i < items.len() {
+                    if let redis::Value::Array(fields) = &items[i] {
+                        let mut j = 0usize;
+                        while j + 1 < fields.len() {
+                            let k = &fields[j];
+                            let v = &fields[j + 1];
+                            let key_is_score = match k {
+                                redis::Value::BulkString(b) => std::str::from_utf8(b)
+                                    .ok()
+                                    .map(|s| s == "score")
+                                    .unwrap_or(false),
+                                redis::Value::SimpleString(s) => s == "score",
+                                _ => false,
+                            };
+                            if key_is_score {
+                                if let Some(num) = match v {
+                                    redis::Value::BulkString(b) => std::str::from_utf8(b)
+                                        .ok()
+                                        .and_then(|s| s.parse::<f64>().ok()),
+                                    redis::Value::SimpleString(s) => s.parse::<f64>().ok(),
+                                    redis::Value::Int(i) => Some(*i as f64),
+                                    _ => None,
+                                } {
+                                    score_opt = Some(num);
+                                    break;
+                                }
+                            }
+                            j += 2;
+                        }
+                        i += 1;
+                    }
+                }
+                if let Some(id) = id_opt {
+                    out.push((id, score_opt));
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+// Helper for computing feedback metrics heuristics
+fn compute_feedback_scoring(delta_secs: i64, user_text: &str) -> (f64, i32, i32, bool) {
+    let lc = user_text.to_lowercase();
+    let corrected = [
+        "actually",
+        "no,",
+        "that's not",
+        "incorrect",
+        "correction",
+        "wrong",
+        "not true",
+        "should be",
+    ]
+    .iter()
+    .any(|s| lc.contains(s));
+
+    let positive_ack = [
+        "thanks",
+        "thank you",
+        "got it",
+        "great",
+        "perfect",
+        "that works",
+        "awesome",
+        "nice",
+    ]
+    .iter()
+    .any(|s| lc.contains(s));
+
+    let mut score = if corrected {
+        0.3
+    } else if delta_secs < 30 {
+        0.9
+    } else if delta_secs < 120 {
+        0.7
+    } else {
+        0.5
+    };
+
+    if positive_ack {
+        score = (score + 0.1f64).min(1.0f64);
+    }
+    if corrected {
+        score = (score - 0.1f64).max(0.0f64);
+    }
+
+    let abandoned = if delta_secs >= 600 { 1 } else { 0 };
+    let continued = 1; // this helper is used only when we see a follow-up
+    (score, abandoned, continued, corrected)
 }
 
 #[tool_handler]
@@ -248,5 +929,85 @@ impl ServerHandler for UnifiedIntelligenceService {
                 "UnifiedIntelligence MCP Server for Redis-backed thought storage".into(),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_doc_ids_and_scores_with_scores() {
+        let val = redis::Value::Array(vec![
+            redis::Value::Int(2),
+            redis::Value::BulkString(b"doc:1".to_vec()),
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"score".to_vec()),
+                redis::Value::BulkString(b"0.123".to_vec()),
+            ]),
+            redis::Value::BulkString(b"doc:2".to_vec()),
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"score".to_vec()),
+                redis::Value::BulkString(b"0.456".to_vec()),
+            ]),
+        ]);
+
+        let out = extract_doc_ids_and_scores(&val);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].0, "doc:1");
+        assert!((out[0].1.unwrap() - 0.123).abs() < 1e-9);
+        assert_eq!(out[1].0, "doc:2");
+        assert!((out[1].1.unwrap() - 0.456).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_extract_doc_ids_and_scores_nocontent() {
+        let val = redis::Value::Array(vec![
+            redis::Value::Int(2),
+            redis::Value::BulkString(b"doc:1".to_vec()),
+            redis::Value::BulkString(b"doc:2".to_vec()),
+        ]);
+        let out = extract_doc_ids_and_scores(&val);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].0, "doc:1");
+        assert!(out[0].1.is_none());
+        assert_eq!(out[1].0, "doc:2");
+        assert!(out[1].1.is_none());
+    }
+
+    #[test]
+    fn test_compute_feedback_scoring_thresholds() {
+        // Fast continuation, positive ack
+        let (s1, a1, c1, corr1) = compute_feedback_scoring(10, "Thanks, that works");
+        assert!(s1 >= 0.9 && s1 <= 1.0);
+        assert_eq!(a1, 0);
+        assert_eq!(c1, 1);
+        assert!(!corr1);
+
+        // Normal continuation
+        let (s2, a2, c2, corr2) = compute_feedback_scoring(60, "okay");
+        assert!((s2 - 0.7).abs() < 1e-9);
+        assert_eq!(a2, 0);
+        assert_eq!(c2, 1);
+        assert!(!corr2);
+
+        // Slow continuation
+        let (s3, a3, c3, corr3) = compute_feedback_scoring(180, "following up");
+        assert!((s3 - 0.5).abs() < 1e-9);
+        assert_eq!(a3, 0);
+        assert_eq!(c3, 1);
+        assert!(!corr3);
+
+        // Correction case
+        let (s4, a4, c4, corr4) = compute_feedback_scoring(20, "Actually, that's not correct");
+        assert!(s4 <= 0.3);
+        assert_eq!(a4, 0);
+        assert_eq!(c4, 1);
+        assert!(corr4);
+
+        // Abandoned threshold (helper always marks continued=1; abandon detection handled elsewhere by elapsed time)
+        let (s5, a5, _c5, _corr5) = compute_feedback_scoring(1200, "");
+        assert_eq!(a5, 1);
+        assert!(s5 <= 0.5);
     }
 }

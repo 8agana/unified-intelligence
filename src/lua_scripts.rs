@@ -1,6 +1,5 @@
 /// Lua script constants for atomic Redis operations
 /// These scripts ensure atomicity and prevent race conditions in multi-step operations
-
 /// Script to atomically store a thought with all associated operations
 ///
 /// KEYS[1] = thought key ({instance}:Thoughts:{uuid})
@@ -247,5 +246,11 @@ impl LoadedScripts {
             get_chain_thoughts: String::new(),
             cleanup_expired: String::new(),
         }
+    }
+}
+
+impl Default for LoadedScripts {
+    fn default() -> Self {
+        Self::new()
     }
 }

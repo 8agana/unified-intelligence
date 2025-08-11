@@ -4,10 +4,11 @@ pub mod recall;
 /// Handler modules for UnifiedIntelligence MCP tools
 pub mod thoughts;
 
-use crate::config::Config;
-use crate::qdrant_service::QdrantService;
+#[cfg(test)]
+mod test_handlers;
+
 use crate::redis::RedisManager;
-use crate::repository_traits::{ThoughtRepository, KnowledgeRepository};
+use crate::repository_traits::{KnowledgeRepository, ThoughtRepository};
 use crate::validation::InputValidator;
 use crate::visual::VisualOutput;
 use std::sync::Arc;
@@ -25,8 +26,6 @@ pub struct ToolHandlers<R: ThoughtRepository + KnowledgeRepository> {
     pub(crate) recall: RecallHandler<R>,
     pub(crate) help: HelpHandler,
     pub(crate) redis_manager: Arc<RedisManager>,
-    pub(crate) qdrant_service: QdrantService,
-    pub(crate) config: Arc<Config>,
 }
 
 impl<R: ThoughtRepository + KnowledgeRepository> ToolHandlers<R> {
@@ -35,8 +34,6 @@ impl<R: ThoughtRepository + KnowledgeRepository> ToolHandlers<R> {
         instance_id: String,
         validator: Arc<InputValidator>,
         redis_manager: Arc<RedisManager>,
-        qdrant_service: QdrantService,
-        config: Arc<Config>,
     ) -> Self {
         Self {
             repository: repository.clone(),
@@ -46,21 +43,6 @@ impl<R: ThoughtRepository + KnowledgeRepository> ToolHandlers<R> {
             recall: RecallHandler::new(repository.clone(), instance_id.clone()),
             help: HelpHandler::new(instance_id.clone()),
             redis_manager,
-            qdrant_service,
-            config,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::repository::MockThoughtRepository;
-
-    fn create_test_handler() -> ToolHandlers<MockThoughtRepository> {
-        let repository = Arc::new(MockThoughtRepository::new());
-        let validator = Arc::new(InputValidator::new());
-
-        ToolHandlers::new(repository, "test".to_string(), validator)
     }
 }

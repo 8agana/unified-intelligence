@@ -1,8 +1,5 @@
 use anyhow::Result;
 use rmcp::{ServiceExt, transport::stdio};
-use tracing_subscriber;
-
-use crate::error::UnifiedIntelligenceError;
 
 mod circuit_breaker;
 mod config;
@@ -21,6 +18,7 @@ mod repository_traits;
 mod retry;
 mod service;
 mod synth;
+mod tools;
 mod transport;
 mod validation;
 mod visual;
@@ -41,10 +39,7 @@ async fn main() -> Result<()> {
         .init();
 
     // Load configuration
-    let config = Arc::new(Config::load().map_err(|e| {
-        tracing::error!("main: Failed to load config: {}", e);
-        UnifiedIntelligenceError::Config(format!("Failed to load config: {}", e))
-    })?);
+    let config = Arc::new(Config::load());
 
     // Initialize RedisManager
     let redis_manager = Arc::new(RedisManager::new_with_config(&config).await?);
@@ -54,7 +49,8 @@ async fn main() -> Result<()> {
         std::env::var("INSTANCE_ID").unwrap_or_else(|_| config.server.default_instance_id.clone());
     let qdrant_service = QdrantService::new(&instance_id).await?;
 
-    let service = UnifiedIntelligenceService::new(redis_manager.clone(), qdrant_service).await?;
+    let service =
+        UnifiedIntelligenceService::new(redis_manager.clone(), Arc::new(qdrant_service)).await?;
 
     tracing::info!("main: Service created, starting server on stdio transport");
     let server = service.serve(stdio()).await?;

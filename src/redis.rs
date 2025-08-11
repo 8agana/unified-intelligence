@@ -4,8 +4,6 @@ use deadpool::managed::QueueMode;
 use deadpool_redis::{Config as DeadpoolConfig, Pool, PoolConfig, Runtime, Timeouts};
 use redis::{AsyncCommands, JsonAsyncCommands, Script};
 
-use bincode;
-use chrono;
 use sha2::{Digest, Sha256};
 
 use crate::error::{Result, UnifiedIntelligenceError};
@@ -140,6 +138,7 @@ impl RedisManager {
     // Use scan_match() instead for pattern matching, which is non-blocking and production-safe.
 
     /// Add member to a set
+    #[allow(dead_code)]
     pub async fn sadd(&self, key: &str, member: &str) -> Result<()> {
         let mut conn = self.get_connection().await?;
         conn.sadd::<_, _, ()>(key, member).await?;
@@ -152,6 +151,7 @@ impl RedisManager {
     // ===== BOOST SCORE METHODS (Phase 3) =====
 
     /// Add entry to Redis Stream
+    #[allow(dead_code)]
     pub async fn xadd(&self, key: &str, id: &str, fields: Vec<(&str, &str)>) -> Result<String> {
         let mut conn = self.get_connection().await?;
 
@@ -185,8 +185,7 @@ impl RedisManager {
             .await
             .map_err(|e| {
                 UnifiedIntelligenceError::Internal(format!(
-                    "Failed to load store thought script: {}",
-                    e
+                    "Failed to load store thought script: {e}"
                 ))
             })?;
 
@@ -198,8 +197,7 @@ impl RedisManager {
             .await
             .map_err(|e| {
                 UnifiedIntelligenceError::Internal(format!(
-                    "Failed to load get thought script: {}",
-                    e
+                    "Failed to load get thought script: {e}"
                 ))
             })?;
 
@@ -211,8 +209,7 @@ impl RedisManager {
             .await
             .map_err(|e| {
                 UnifiedIntelligenceError::Internal(format!(
-                    "Failed to load search thoughts script: {}",
-                    e
+                    "Failed to load search thoughts script: {e}"
                 ))
             })?;
 
@@ -224,8 +221,7 @@ impl RedisManager {
             .await
             .map_err(|e| {
                 UnifiedIntelligenceError::Internal(format!(
-                    "Failed to load update chain script: {}",
-                    e
+                    "Failed to load update chain script: {e}"
                 ))
             })?;
 
@@ -237,8 +233,7 @@ impl RedisManager {
             .await
             .map_err(|e| {
                 UnifiedIntelligenceError::Internal(format!(
-                    "Failed to load get chain thoughts script: {}",
-                    e
+                    "Failed to load get chain thoughts script: {e}"
                 ))
             })?;
 
@@ -250,8 +245,7 @@ impl RedisManager {
             .await
             .map_err(|e| {
                 UnifiedIntelligenceError::Internal(format!(
-                    "Failed to load cleanup expired script: {}",
-                    e
+                    "Failed to load cleanup expired script: {e}"
                 ))
             })?;
 
@@ -265,6 +259,7 @@ impl RedisManager {
     }
 
     /// Execute atomic thought storage using Lua script
+    #[allow(clippy::too_many_arguments)]
     pub async fn store_thought_atomic(
         &self,
         thought_key: &str,
@@ -308,23 +303,20 @@ impl RedisManager {
             .arg(&args)
             .query_async(&mut *conn)
             .await
-            .or_else(|e| {
-                // If script not loaded, reload and retry
+            .map_err(|e| {
                 if e.to_string().contains("NOSCRIPT") {
                     tracing::warn!("Script not found in cache, reloading...");
-                    return Err(UnifiedIntelligenceError::Internal(
-                        "Script needs reloading".to_string(),
-                    ));
+                    UnifiedIntelligenceError::Internal("Script needs reloading".to_string())
+                } else {
+                    UnifiedIntelligenceError::Redis(e)
                 }
-                Err(UnifiedIntelligenceError::Redis(e))
             })?;
 
         match result.as_str() {
             "OK" => Ok(true),
             "DUPLICATE" => Ok(false),
             _ => Err(UnifiedIntelligenceError::Internal(format!(
-                "Unexpected script result: {}",
-                result
+                "Unexpected script result: {result}"
             ))),
         }
     }
@@ -352,14 +344,13 @@ impl RedisManager {
             .arg(instance) // ARGV[1]
             .query_async(&mut *conn)
             .await
-            .or_else(|e| {
+            .map_err(|e| {
                 if e.to_string().contains("NOSCRIPT") {
                     tracing::warn!("Get chain thoughts script not found in cache");
-                    return Err(UnifiedIntelligenceError::Internal(
-                        "Script needs reloading".to_string(),
-                    ));
+                    UnifiedIntelligenceError::Internal("Script needs reloading".to_string())
+                } else {
+                    UnifiedIntelligenceError::Redis(e)
                 }
-                Err(UnifiedIntelligenceError::Redis(e))
             })?;
 
         Ok(result)
@@ -370,7 +361,7 @@ impl RedisManager {
     /// Initialize event stream for an instance with max length
     pub async fn init_event_stream(&self, instance: &str) -> Result<()> {
         let mut conn = self.get_connection().await?;
-        let stream_key = format!("{}:events", instance);
+        let stream_key = format!("{instance}:events");
 
         // Check if stream exists by trying to get info
         let exists: std::result::Result<Vec<Vec<String>>, _> = redis::cmd("XINFO")
@@ -425,25 +416,23 @@ impl RedisManager {
         data: Vec<(&str, &str)>,
     ) -> Result<String> {
         let mut conn = self.get_connection().await?;
-        let stream_key = format!("{}:events", instance);
+        let stream_key = format!("{instance}:events");
 
         // Build arguments for XADD
-        let mut args = vec![];
-        args.push("MAXLEN");
-        args.push("~");
-        args.push("10000");
-        args.push("*"); // Auto-generate ID
-
-        // Add event type and instance
-        args.push("event_type");
-        args.push(event_type);
-        args.push("instance");
-        args.push(instance);
-        args.push("timestamp");
-
         let timestamp = chrono::Utc::now().to_rfc3339();
         let timestamp_ref = &timestamp;
-        args.push(timestamp_ref);
+        let mut args = vec![
+            "MAXLEN",
+            "~",
+            "10000",
+            "*", // Auto-generate ID
+            "event_type",
+            event_type,
+            "instance",
+            instance,
+            "timestamp",
+            timestamp_ref,
+        ];
 
         // Add custom data fields
         for (key, value) in &data {
@@ -508,7 +497,7 @@ impl RedisManager {
         event_type: &str,
         data: &serde_json::Value,
     ) -> Result<String> {
-        let stream_key = format!("{}:events", instance);
+        let stream_key = format!("{instance}:events");
         let event_id = "*"; // Auto-generate timestamp
 
         let fields = vec![
@@ -530,6 +519,7 @@ impl RedisManager {
     }
 
     /// Get a cached embedding from Redis
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn get_cached_embedding(&self, text: &str) -> Result<Option<Vec<f32>>> {
         let mut conn = self.get_connection().await?;
         let key = format!("embedding:{}", hex::encode(Sha256::digest(text))); // Use SHA256 hash of text as key
@@ -540,8 +530,7 @@ impl RedisManager {
             Some(bytes) => {
                 let embedding: Vec<f32> = bincode::deserialize(&bytes).map_err(|e| {
                     UnifiedIntelligenceError::Internal(format!(
-                        "Failed to deserialize embedding: {}",
-                        e
+                        "Failed to deserialize embedding: {e}"
                     ))
                 })?;
                 Ok(Some(embedding))
@@ -551,6 +540,7 @@ impl RedisManager {
     }
 
     /// Set a cached embedding in Redis with a TTL
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn set_cached_embedding(
         &self,
         text: &str,
@@ -561,7 +551,7 @@ impl RedisManager {
         let key = format!("embedding:{}", hex::encode(Sha256::digest(text))); // Use SHA256 hash of text as key
 
         let bytes = bincode::serialize(embedding).map_err(|e| {
-            UnifiedIntelligenceError::Internal(format!("Failed to serialize embedding: {}", e))
+            UnifiedIntelligenceError::Internal(format!("Failed to serialize embedding: {e}"))
         })?;
 
         conn.set_ex::<_, _, ()>(&key, bytes, ttl_seconds as u64)
@@ -596,14 +586,13 @@ impl RedisManager {
             .arg(&args)
             .query_async(&mut *conn)
             .await
-            .or_else(|e| {
+            .map_err(|e| {
                 if e.to_string().contains("NOSCRIPT") {
                     tracing::warn!("RediSearch script not found in cache, reloading...");
-                    return Err(UnifiedIntelligenceError::Internal(
-                        "Script needs reloading".to_string(),
-                    ));
+                    UnifiedIntelligenceError::Internal("Script needs reloading".to_string())
+                } else {
+                    UnifiedIntelligenceError::Redis(e)
                 }
-                Err(UnifiedIntelligenceError::Redis(e))
             })?;
 
         Ok(result)

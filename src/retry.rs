@@ -1,12 +1,6 @@
 /// Retry policy configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RetryConfig {}
-
-impl Default for RetryConfig {
-    fn default() -> Self {
-        Self {}
-    }
-}
 
 /// Retry policy for different operation types
 #[derive(Debug, Clone)]

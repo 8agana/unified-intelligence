@@ -3,7 +3,7 @@ use serde_json::json;
 use tracing;
 
 use crate::error::Result;
-use crate::repository_traits::{ThoughtRepository, KnowledgeRepository};
+use crate::repository_traits::{KnowledgeRepository, ThoughtRepository};
 
 /// Parameters for the ui_help tool
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

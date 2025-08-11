@@ -26,15 +26,15 @@ impl RedisThoughtRepository {
     }
 
     fn thought_key(&self, instance: &str, thought_id: &str) -> String {
-        format!("{}:Thoughts:{}", instance, thought_id)
+        format!("{instance}:Thoughts:{thought_id}")
     }
 
     fn chain_metadata_key(&self, chain_id: &str) -> String {
-        format!("Chains:metadata:{}", chain_id)
+        format!("Chains:metadata:{chain_id}")
     }
 
     fn redi_search_index_name(&self, instance: &str) -> String {
-        format!("{}:thoughts_idx", instance)
+        format!("{instance}:thoughts_idx")
     }
 }
 
@@ -50,11 +50,11 @@ impl ThoughtRepository for RedisThoughtRepository {
             .map(|id| format!("{}:chains:{}", thought.instance, id));
 
         // Serialize thought to JSON
-        let thought_json = serde_json::to_string(thought)
-            .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?;
+        let thought_json =
+            serde_json::to_string(thought).map_err(crate::error::UnifiedIntelligenceError::Json)?;
 
         // Parse timestamp from ISO string to epoch seconds
-        let timestamp = chrono::DateTime::parse_from_rfc3339(&thought.timestamp)
+        let _timestamp = chrono::DateTime::parse_from_rfc3339(&thought.timestamp)
             .map(|dt| dt.timestamp())
             .unwrap_or_else(|_| {
                 // Fallback to current time if parsing fails
@@ -74,7 +74,7 @@ impl ThoughtRepository for RedisThoughtRepository {
                 chain_key.as_deref(),
                 &thought_json,
                 &thought.id,
-                timestamp,
+                _timestamp,
                 thought.chain_id.as_deref(),
             )
             .await?;
@@ -86,19 +86,9 @@ impl ThoughtRepository for RedisThoughtRepository {
                 preview,
             });
         } else {
-            // Publish thought_created event to Redis Streams for background processing
-            let timestamp = chrono::DateTime::parse_from_rfc3339(&thought.timestamp)
-                .map(|dt| dt.timestamp())
-                .unwrap_or_else(|_| {
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
-                        .as_secs() as i64
-                });
-
             // Publish to Redis Streams for background service
             let event_data = serde_json::to_value(thought)
-                .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?;
+                .map_err(crate::error::UnifiedIntelligenceError::Json)?;
 
             if let Err(e) = self
                 .redis
@@ -179,7 +169,7 @@ impl ThoughtRepository for RedisThoughtRepository {
         instance: &str,
         chain_id: &str,
     ) -> Result<Vec<ThoughtRecord>> {
-        let chain_key = format!("{}:chains:{}", instance, chain_id);
+        let chain_key = format!("{instance}:chains:{chain_id}");
         let thought_jsons = self
             .redis
             .get_chain_thoughts_atomic(&chain_key, instance)
@@ -187,7 +177,7 @@ impl ThoughtRepository for RedisThoughtRepository {
         let mut thoughts = Vec::new();
         for json_str in thought_jsons {
             let thought: ThoughtRecord = serde_json::from_str(&json_str)
-                .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?;
+                .map_err(crate::error::UnifiedIntelligenceError::Json)?;
             thoughts.push(thought);
         }
         Ok(thoughts)
@@ -210,7 +200,7 @@ impl ThoughtRepository for RedisThoughtRepository {
         // The first element of the result is the total count, so skip it
         for json_str in thought_jsons.into_iter().skip(1) {
             let thought: ThoughtRecord = serde_json::from_str(&json_str)
-                .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?;
+                .map_err(crate::error::UnifiedIntelligenceError::Json)?;
             thoughts.push(thought);
         }
         Ok(thoughts)
@@ -219,7 +209,7 @@ impl ThoughtRepository for RedisThoughtRepository {
 
 // ========== KNOWLEDGE GRAPH REPOSITORY IMPLEMENTATION ==========
 
-use crate::models::{KnowledgeNode, KnowledgeRelation, KnowledgeScope, EntityType};
+use crate::models::{EntityType, KnowledgeNode, KnowledgeRelation, KnowledgeScope};
 use crate::repository_traits::KnowledgeRepository;
 use redis::{RedisError, Script};
 
@@ -233,7 +223,8 @@ pub struct RedisKnowledgeRepository {
 impl RedisKnowledgeRepository {
     pub fn new(redis_manager: Arc<RedisManager>, instance_id: String) -> Self {
         // Lua script for atomic entity creation + index update
-        let create_entity_script = Script::new(r#"
+        let create_entity_script = Script::new(
+            r#"
             local entity_key = KEYS[1]
             local index_key = KEYS[2]
             local entity_json = ARGV[1]
@@ -247,62 +238,67 @@ impl RedisKnowledgeRepository {
             redis.call('HSET', index_key, entity_name, entity_id)
             
             return 'OK'
-        "#);
-        
-        Self { redis_manager, create_entity_script, instance_id }
+        "#,
+        );
+
+        Self {
+            redis_manager,
+            create_entity_script,
+            instance_id,
+        }
     }
-    
+
     // Use Display trait instead of Debug format for keys
     fn get_entity_key(&self, id: &str, scope: &KnowledgeScope) -> String {
         let prefix = match scope {
             KnowledgeScope::Personal => &self.instance_id,
             _ => &scope.to_string(),
         };
-        format!("{}:KG:entity:{}", prefix, id)
+        format!("{prefix}:KG:entity:{id}")
     }
-    
+
     fn get_relation_key(&self, id: &str, scope: &KnowledgeScope) -> String {
         let prefix = match scope {
             KnowledgeScope::Personal => &self.instance_id,
             _ => &scope.to_string(),
         };
-        format!("{}:KG:relation:{}", prefix, id)
+        format!("{prefix}:KG:relation:{id}")
     }
-    
+
     // Use Redis Hash for name index
     fn get_index_key(&self, scope: &KnowledgeScope) -> String {
         let prefix = match scope {
             KnowledgeScope::Personal => &self.instance_id,
             _ => &scope.to_string(),
         };
-        format!("{}:KG:index:name_to_id", prefix)
+        format!("{prefix}:KG:index:name_to_id")
     }
-    
+
     fn get_relation_index_key(&self, entity_id: &str, scope: &KnowledgeScope) -> String {
         let prefix = match scope {
             KnowledgeScope::Personal => &self.instance_id,
             _ => &scope.to_string(),
         };
-        format!("{}:KG:index:entity_relations:{}", prefix, entity_id)
+        format!("{prefix}:KG:index:entity_relations:{entity_id}")
     }
-    
+
     // SCAN-based search as fallback (non-blocking)
     async fn search_entities_with_scan(
         &self,
         query: &str,
         scope: &KnowledgeScope,
         entity_type: Option<&EntityType>,
-        limit: usize
+        limit: usize,
     ) -> Result<Vec<KnowledgeNode>> {
         let mut conn = self.redis_manager.get_connection().await?;
         let prefix = match scope {
             KnowledgeScope::Personal => &self.instance_id,
             _ => &scope.to_string(),
         };
-        let pattern = format!("{}:KG:entity:*", prefix);
+        let pattern = format!("{prefix}:KG:entity:*");
         let mut cursor = 0u64;
         let mut results = Vec::new();
-        
+
         // Use SCAN instead of KEYS to avoid blocking
         loop {
             let (new_cursor, keys): (u64, Vec<String>) = redis::cmd("SCAN")
@@ -314,7 +310,7 @@ impl RedisKnowledgeRepository {
                 .query_async(&mut conn)
                 .await
                 .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-            
+
             for key in keys {
                 if let Ok(json_str) = redis::cmd("JSON.GET")
                     .arg(&key)
@@ -325,18 +321,26 @@ impl RedisKnowledgeRepository {
                     if let Ok(nodes) = serde_json::from_str::<Vec<KnowledgeNode>>(&json_str) {
                         for node in nodes {
                             // Filter by query (check name, tags, and display_name)
-                            let matches_query = node.name.to_lowercase().contains(&query.to_lowercase()) 
-                                || node.display_name.to_lowercase().contains(&query.to_lowercase())
-                                || node.tags.iter().any(|tag| tag.to_lowercase().contains(&query.to_lowercase()));
-                            
+                            let matches_query =
+                                node.name.to_lowercase().contains(&query.to_lowercase())
+                                    || node
+                                        .display_name
+                                        .to_lowercase()
+                                        .contains(&query.to_lowercase())
+                                    || node.tags.iter().any(|tag| {
+                                        tag.to_lowercase().contains(&query.to_lowercase())
+                                    });
+
                             // Filter by entity type if specified
-                            let matches_type = entity_type.map_or(true, |et| {
-                                match (&node.entity_type, et) {
+                            let matches_type =
+                                entity_type.is_none_or(|et| match (&node.entity_type, et) {
                                     (EntityType::Custom(a), EntityType::Custom(b)) => a == b,
-                                    _ => std::mem::discriminant(&node.entity_type) == std::mem::discriminant(et)
-                                }
-                            });
-                            
+                                    _ => {
+                                        std::mem::discriminant(&node.entity_type)
+                                            == std::mem::discriminant(et)
+                                    }
+                                });
+
                             if matches_query && matches_type {
                                 results.push(node);
                                 if results.len() >= limit {
@@ -347,32 +351,38 @@ impl RedisKnowledgeRepository {
                     }
                 }
             }
-            
+
             cursor = new_cursor;
             if cursor == 0 {
                 break; // Scan complete
             }
         }
-        
+
         Ok(results)
     }
-    
+
     // Missing relation index implementation
     async fn update_relation_index(
-        &self, 
-        entity_id: &str, 
-        relation_id: &str, 
-        direction: &str, 
-        scope: &KnowledgeScope
+        &self,
+        entity_id: &str,
+        relation_id: &str,
+        direction: &str,
+        scope: &KnowledgeScope,
     ) -> Result<()> {
         let mut conn = self.redis_manager.get_connection().await?;
         let index_key = self.get_relation_index_key(entity_id, scope);
-        
+
         // Use Redis Hash for relation indices
-        let field = format!("{}:{}", direction, relation_id);
-        let _: () = redis::AsyncCommands::hset(&mut conn, &index_key, &field, chrono::Utc::now().to_rfc3339()).await
-            .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
+        let field = format!("{direction}:{relation_id}");
+        let _: () = redis::AsyncCommands::hset(
+            &mut conn,
+            &index_key,
+            &field,
+            chrono::Utc::now().to_rfc3339(),
+        )
+        .await
+        .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
+
         Ok(())
     }
 }
@@ -383,11 +393,12 @@ impl KnowledgeRepository for RedisKnowledgeRepository {
         let mut conn = self.redis_manager.get_connection().await?;
         let entity_key = self.get_entity_key(&node.id, &node.scope);
         let index_key = self.get_index_key(&node.scope);
-        let json_str = serde_json::to_string(&node)
-            .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?;
-        
+        let json_str =
+            serde_json::to_string(&node).map_err(crate::error::UnifiedIntelligenceError::Json)?;
+
         // Use atomic Lua script for entity creation + index update
-        let _: String = self.create_entity_script
+        let _: String = self
+            .create_entity_script
             .key(entity_key)
             .key(index_key)
             .arg(&json_str)
@@ -396,54 +407,70 @@ impl KnowledgeRepository for RedisKnowledgeRepository {
             .invoke_async(&mut conn)
             .await
             .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
+
         // Knowledge graph entities should persist indefinitely (no TTL)
-        
-        tracing::info!("Created knowledge entity '{}' in {} scope", node.name, node.scope);
+
+        tracing::info!(
+            "Created knowledge entity '{}' in {} scope",
+            node.name,
+            node.scope
+        );
         Ok(())
     }
-    
+
     async fn get_entity(&self, id: &str, scope: &KnowledgeScope) -> Result<KnowledgeNode> {
         let mut conn = self.redis_manager.get_connection().await?;
         let key = self.get_entity_key(id, scope);
-        
-        let json_str: String = redis::cmd("JSON.GET")
+
+        let json_str: Option<String> = redis::cmd("JSON.GET")
             .arg(&key)
             .arg("$")
             .query_async(&mut conn)
             .await
             .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
+
+        let json_str = json_str.ok_or_else(|| {
+            crate::error::UnifiedIntelligenceError::NotFound(format!("Entity {id} not found"))
+        })?;
+
         // Parse the JSON array response (RedisJSON returns array even for single path)
         let json_array: Vec<KnowledgeNode> = serde_json::from_str(&json_str)
-            .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?;
-        json_array.into_iter().next()
-            .ok_or_else(|| crate::error::UnifiedIntelligenceError::NotFound(format!("Entity {} not found", id)))
+            .map_err(crate::error::UnifiedIntelligenceError::Json)?;
+        json_array.into_iter().next().ok_or_else(|| {
+            crate::error::UnifiedIntelligenceError::NotFound(format!("Entity {id} not found"))
+        })
     }
-    
-    async fn get_entity_by_name(&self, name: &str, scope: &KnowledgeScope) -> Result<KnowledgeNode> {
+
+    async fn get_entity_by_name(
+        &self,
+        name: &str,
+        scope: &KnowledgeScope,
+    ) -> Result<KnowledgeNode> {
         let mut conn = self.redis_manager.get_connection().await?;
         let index_key = self.get_index_key(scope);
-        
+
         // Use Redis Hash HGET instead of JSON.GET for name index
-        let entity_id: Option<String> = redis::AsyncCommands::hget(&mut conn, &index_key, name).await
+        let entity_id: Option<String> = redis::AsyncCommands::hget(&mut conn, &index_key, name)
+            .await
             .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
+
         let entity_id = entity_id.ok_or_else(|| {
-            crate::error::UnifiedIntelligenceError::NotFound(format!("Entity '{}' not found in index", name))
+            crate::error::UnifiedIntelligenceError::NotFound(format!(
+                "Entity '{name}' not found in index",
+            ))
         })?;
-        
+
         self.get_entity(&entity_id, scope).await
     }
-    
+
     async fn update_entity(&self, node: KnowledgeNode) -> Result<()> {
         let mut conn = self.redis_manager.get_connection().await?;
         let entity_key = self.get_entity_key(&node.id, &node.scope);
-        
+
         // Update the entire entity
-        let json_str = serde_json::to_string(&node)
-            .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?;
-        
+        let json_str =
+            serde_json::to_string(&node).map_err(crate::error::UnifiedIntelligenceError::Json)?;
+
         let _: String = redis::cmd("JSON.SET")
             .arg(&entity_key)
             .arg("$")
@@ -451,55 +478,62 @@ impl KnowledgeRepository for RedisKnowledgeRepository {
             .query_async(&mut conn)
             .await
             .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
+
         tracing::info!("Updated knowledge entity '{}'", node.name);
         Ok(())
     }
-    
+
     async fn delete_entity(&self, id: &str, scope: &KnowledgeScope) -> Result<()> {
         let mut conn = self.redis_manager.get_connection().await?;
-        
+
         // Get entity first to get the name for index cleanup
         let entity = self.get_entity(id, scope).await?;
         let entity_key = self.get_entity_key(id, scope);
         let index_key = self.get_index_key(scope);
-        
+
         // Delete entity
         let _: i32 = redis::cmd("JSON.DEL")
             .arg(&entity_key)
             .query_async(&mut conn)
             .await
             .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
+
         // Remove from name index
-        let _: () = redis::AsyncCommands::hdel(&mut conn, &index_key, &entity.name).await
+        let _: () = redis::AsyncCommands::hdel(&mut conn, &index_key, &entity.name)
+            .await
             .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
-        tracing::info!("Deleted knowledge entity '{}' from {} scope", entity.name, scope);
+
+        tracing::info!(
+            "Deleted knowledge entity '{}' from {} scope",
+            entity.name,
+            scope
+        );
         Ok(())
     }
-    
+
     async fn search_entities(
         &self,
         query: &str,
         scope: &KnowledgeScope,
         entity_type: Option<&EntityType>,
-        limit: usize
+        limit: usize,
     ) -> Result<Vec<KnowledgeNode>> {
         tracing::info!("Searching for '{}' in {} scope", query, scope);
-        
+
         // Use SCAN-based search (production-safe)
-        let entities = self.search_entities_with_scan(query, scope, entity_type, limit).await?;
-        
+        let entities = self
+            .search_entities_with_scan(query, scope, entity_type, limit)
+            .await?;
+
         Ok(entities)
     }
-    
+
     async fn create_relation(&self, relation: KnowledgeRelation) -> Result<()> {
         let mut conn = self.redis_manager.get_connection().await?;
         let relation_key = self.get_relation_key(&relation.id, &relation.scope);
         let json_str = serde_json::to_string(&relation)
-            .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?;
-        
+            .map_err(crate::error::UnifiedIntelligenceError::Json)?;
+
         // Store relation
         let _: String = redis::cmd("JSON.SET")
             .arg(&relation_key)
@@ -508,29 +542,51 @@ impl KnowledgeRepository for RedisKnowledgeRepository {
             .query_async(&mut conn)
             .await
             .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
+
         // Update relation indices for both entities
-        self.update_relation_index(&relation.from_entity_id, &relation.id, "outgoing", &relation.scope).await?;
-        self.update_relation_index(&relation.to_entity_id, &relation.id, "incoming", &relation.scope).await?;
-        
-        tracing::info!("Created relation '{}' from {} to {}", 
-            relation.relationship_type, relation.from_entity_id, relation.to_entity_id);
+        self.update_relation_index(
+            &relation.from_entity_id,
+            &relation.id,
+            "outgoing",
+            &relation.scope,
+        )
+        .await?;
+        self.update_relation_index(
+            &relation.to_entity_id,
+            &relation.id,
+            "incoming",
+            &relation.scope,
+        )
+        .await?;
+
+        tracing::info!(
+            "Created relation '{}' from {} to {}",
+            relation.relationship_type,
+            relation.from_entity_id,
+            relation.to_entity_id
+        );
         Ok(())
     }
-    
-    async fn get_relations(&self, entity_id: &str, scope: &KnowledgeScope) -> Result<Vec<KnowledgeRelation>> {
+
+    async fn get_relations(
+        &self,
+        entity_id: &str,
+        scope: &KnowledgeScope,
+    ) -> Result<Vec<KnowledgeRelation>> {
         let mut conn = self.redis_manager.get_connection().await?;
         let index_key = self.get_relation_index_key(entity_id, scope);
-        
+
         // Get all relations from the index
-        let relations: std::collections::HashMap<String, String> = redis::AsyncCommands::hgetall(&mut conn, &index_key).await
-            .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
+        let relations: std::collections::HashMap<String, String> =
+            redis::AsyncCommands::hgetall(&mut conn, &index_key)
+                .await
+                .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
+
         let mut result = Vec::new();
         for (field, _) in relations {
             if let Some(relation_id) = field.split(':').nth(1) {
                 let relation_key = self.get_relation_key(relation_id, scope);
-                
+
                 if let Ok(json_str) = redis::cmd("JSON.GET")
                     .arg(&relation_key)
                     .arg("$")
@@ -543,53 +599,69 @@ impl KnowledgeRepository for RedisKnowledgeRepository {
                 }
             }
         }
-        
+
         Ok(result)
     }
-    
+
     async fn update_name_index(&self, name: &str, id: &str, scope: &KnowledgeScope) -> Result<()> {
         let mut conn = self.redis_manager.get_connection().await?;
         let index_key = self.get_index_key(scope);
-        
+
         // Use Redis Hash HSET for atomic index updates
-        let _: () = redis::AsyncCommands::hset(&mut conn, &index_key, name, id).await
+        let _: () = redis::AsyncCommands::hset(&mut conn, &index_key, name, id)
+            .await
             .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
+
         Ok(())
     }
-    
-    async fn set_active_entity(&self, session_key: &str, entity_id: &str, scope: &KnowledgeScope) -> Result<()> {
+
+    async fn set_active_entity(
+        &self,
+        session_key: &str,
+        entity_id: &str,
+        scope: &KnowledgeScope,
+    ) -> Result<()> {
         let mut conn = self.redis_manager.get_connection().await?;
-        
+
         let value = serde_json::json!({
             "entity_id": entity_id,
             "scope": scope,
             "timestamp": chrono::Utc::now().to_rfc3339()
         });
-        
-        let _: () = redis::AsyncCommands::set_ex(&mut conn, session_key, serde_json::to_string(&value)
-            .map_err(|e| crate::error::UnifiedIntelligenceError::Json(e))?, 3600).await
-            .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
+
+        let _: () = redis::AsyncCommands::set_ex(
+            &mut conn,
+            session_key,
+            serde_json::to_string(&value).map_err(crate::error::UnifiedIntelligenceError::Json)?,
+            3600,
+        )
+        .await
+        .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
+
         Ok(())
     }
-    
-    async fn add_thought_to_entity(&self, entity_name: &str, thought_id: &str, scope: &KnowledgeScope) -> Result<()> {
+
+    async fn add_thought_to_entity(
+        &self,
+        entity_name: &str,
+        thought_id: &str,
+        scope: &KnowledgeScope,
+    ) -> Result<()> {
         // Get entity by name first
         let entity = self.get_entity_by_name(entity_name, scope).await?;
         let entity_key = self.get_entity_key(&entity.id, scope);
-        
+
         let mut conn = self.redis_manager.get_connection().await?;
-        
+
         // Append thought_id to the entity's thought_ids array
         let _: i32 = redis::cmd("JSON.ARRAPPEND")
             .arg(&entity_key)
             .arg("$.thought_ids")
-            .arg(&format!("\"{}\"", thought_id))
+            .arg(format!("\"{thought_id}\""))
             .query_async(&mut conn)
             .await
             .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;
-        
+
         tracing::info!("Added thought {} to entity '{}'", thought_id, entity_name);
         Ok(())
     }
@@ -603,9 +675,10 @@ pub struct CombinedRedisRepository {
 
 impl CombinedRedisRepository {
     pub fn new(redis_manager: Arc<RedisManager>, config: Arc<Config>, instance_id: String) -> Self {
-        let thought_repo = RedisThoughtRepository::new(redis_manager.clone(), config, instance_id.clone());
+        let thought_repo =
+            RedisThoughtRepository::new(redis_manager.clone(), config, instance_id.clone());
         let knowledge_repo = RedisKnowledgeRepository::new(redis_manager, instance_id);
-        
+
         Self {
             thought_repo,
             knowledge_repo,
@@ -636,7 +709,9 @@ impl ThoughtRepository for CombinedRedisRepository {
         instance: &str,
         chain_id: &str,
     ) -> Result<Vec<ThoughtRecord>> {
-        self.thought_repo.get_chain_thoughts(instance, chain_id).await
+        self.thought_repo
+            .get_chain_thoughts(instance, chain_id)
+            .await
     }
 
     async fn search_thoughts(
@@ -646,7 +721,9 @@ impl ThoughtRepository for CombinedRedisRepository {
         offset: i64,
         limit: i64,
     ) -> Result<Vec<ThoughtRecord>> {
-        self.thought_repo.search_thoughts(instance, query, offset, limit).await
+        self.thought_repo
+            .search_thoughts(instance, query, offset, limit)
+            .await
     }
 }
 
@@ -660,7 +737,11 @@ impl KnowledgeRepository for CombinedRedisRepository {
         self.knowledge_repo.get_entity(id, scope).await
     }
 
-    async fn get_entity_by_name(&self, name: &str, scope: &KnowledgeScope) -> Result<KnowledgeNode> {
+    async fn get_entity_by_name(
+        &self,
+        name: &str,
+        scope: &KnowledgeScope,
+    ) -> Result<KnowledgeNode> {
         self.knowledge_repo.get_entity_by_name(name, scope).await
     }
 
@@ -673,20 +754,26 @@ impl KnowledgeRepository for CombinedRedisRepository {
     }
 
     async fn search_entities(
-        &self, 
-        query: &str, 
+        &self,
+        query: &str,
         scope: &KnowledgeScope,
         entity_type: Option<&EntityType>,
-        limit: usize
+        limit: usize,
     ) -> Result<Vec<KnowledgeNode>> {
-        self.knowledge_repo.search_entities(query, scope, entity_type, limit).await
+        self.knowledge_repo
+            .search_entities(query, scope, entity_type, limit)
+            .await
     }
 
     async fn create_relation(&self, relation: KnowledgeRelation) -> Result<()> {
         self.knowledge_repo.create_relation(relation).await
     }
 
-    async fn get_relations(&self, entity_id: &str, scope: &KnowledgeScope) -> Result<Vec<KnowledgeRelation>> {
+    async fn get_relations(
+        &self,
+        entity_id: &str,
+        scope: &KnowledgeScope,
+    ) -> Result<Vec<KnowledgeRelation>> {
         self.knowledge_repo.get_relations(entity_id, scope).await
     }
 
@@ -694,12 +781,26 @@ impl KnowledgeRepository for CombinedRedisRepository {
         self.knowledge_repo.update_name_index(name, id, scope).await
     }
 
-    async fn set_active_entity(&self, session_key: &str, entity_id: &str, scope: &KnowledgeScope) -> Result<()> {
-        self.knowledge_repo.set_active_entity(session_key, entity_id, scope).await
+    async fn set_active_entity(
+        &self,
+        session_key: &str,
+        entity_id: &str,
+        scope: &KnowledgeScope,
+    ) -> Result<()> {
+        self.knowledge_repo
+            .set_active_entity(session_key, entity_id, scope)
+            .await
     }
 
-    async fn add_thought_to_entity(&self, entity_name: &str, thought_id: &str, scope: &KnowledgeScope) -> Result<()> {
-        self.knowledge_repo.add_thought_to_entity(entity_name, thought_id, scope).await
+    async fn add_thought_to_entity(
+        &self,
+        entity_name: &str,
+        thought_id: &str,
+        scope: &KnowledgeScope,
+    ) -> Result<()> {
+        self.knowledge_repo
+            .add_thought_to_entity(entity_name, thought_id, scope)
+            .await
     }
 }
 

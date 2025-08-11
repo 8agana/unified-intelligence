@@ -3,11 +3,5 @@
 pub enum CircuitBreakerState {}
 
 /// Circuit breaker configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CircuitBreakerConfig {}
-
-impl Default for CircuitBreakerConfig {
-    fn default() -> Self {
-        Self {}
-    }
-}

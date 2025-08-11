@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### ui_remember completion, hybrid scoring, and config presets - 2025-08-10
+- Implemented Redis-only `ui_remember` conversational memory with T1→T2→T3 flow (user, assistant synthesis, metrics).
+- Added objective feedback loop stored at `voice:feedback:{thought2_id}` with fields: synthesis_quality, continued, abandoned, corrected, time_to_next, feedback_score.
+- Hybrid retrieval: combined text search over thoughts and KNN via RediSearch across indices `idx:{instance}:session-summaries`, `idx:{instance}:important`, and `idx:Federation:embeddings`.
+- KNN score parsing: use `RETURN 1 score` and convert vector distance to similarity via 1/(1+distance); incorporated into hybrid ranking with recency.
+- Config-driven weights: added `ui_remember.hybrid_weights` and presets in `config.yaml`; env overrides (`UI_REMEMBER_*`) supported. Preset is applied last and overrides weights.
+- New docs: `docs/ui_remember_config.md` detailing presets, overrides, precedence, and local check commands.
+- Safety: removed a production unwrap in FT.SEARCH parsing; added tests for score parsing and feedback heuristic.
+- CI workflow: added `.github/workflows/security.yml` (fmt, clippy -D warnings, tests, plus non-blocking cargo audit/deny).
+- Added `.env.example` with common env variables and ui_remember overrides.
+
+### UI Context TTL Behavior - 2025-08-10
+- Default behavior change: ui_context embedding hashes now have no expiration by default.
+- New option: callers can set ttl_seconds > 0 to set an expiry; omitting ttl_seconds leaves keys persistent.
+- Notes: existing keys unaffected; no changes to other tools.
+- Verification: cargo build, cargo clippy -- -D warnings, cargo fmt -- --check all pass.
+
+### Build + MCP Tool Wiring - 2025-08-10
+- Added `ui_context` MCP tool endpoint in `src/service.rs` using `#[tool]`, wiring it to `tools::ui_context::ui_context_impl` with rate limiting and JSON result handling.
+- Exposed missing modules in `src/lib.rs` to fix unresolved imports (`pub mod redis;`, `pub mod lua_scripts;`).
+- Fixed compile errors in `src/tools/ui_context.rs`:
+  - Explicit byte cast for embeddings: `let vector_bytes: Vec<u8> = bytemuck::cast_slice(&vector_f32).to_vec();`.
+  - Specified unit return type for `FT.CREATE` query to satisfy `FromRedisValue`.
+- Declared `mod tools;` in `src/main.rs` to make `crate::tools` visible to the bin crate.
+- Cleaned unused imports in `src/tools/ui_context.rs` and addressed clippy warning (`uninlined_format_args`) in `src/service.rs`.
+- Ensured repo passes: `cargo build`, `cargo clippy -- -D warnings`, and `cargo fmt -- --check`.
+
+Notes
+- Unit tests currently emit warnings and one failure due to direct construction of `RedisManager` using private fields in `src/handlers/test_handlers.rs`. Consider updating tests to use a constructor, a trait-based mock, or helper factory instead of struct literal initialization.
+
 ### CRITICAL MCP PROTOCOL FIX - 2025-08-04
 - **FIXED "Unexpected token 'F'" ERROR**: Resolved DT connection failure that has been blocking usage for days
   - Qdrant client was outputting "Failed to obtain server version" to stdout before MCP handshake
@@ -83,4 +113,3 @@ All notable changes to this project will be documented in this file.
 ```
 - Replace, add, or remove sections as appropriate for your project.
 - For each new release, copy the "Unreleased" section, change the version/date, and start a new "Unreleased" section.
-
