@@ -17,6 +17,18 @@ fn default_tags() -> Option<Vec<String>> {
     Some(vec![])
 }
 
+fn default_thought_number() -> i32 {
+    1
+}
+
+fn default_total_thoughts() -> i32 {
+    1
+}
+
+fn default_next_thought_needed() -> bool {
+    false
+}
+
 /// Flexible integer deserializer to handle string, float, or int inputs from different MCP clients
 fn deserialize_flexible_int<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
 where
@@ -59,6 +71,22 @@ where
     }
 }
 
+/// Flexible integer deserializer with default for thought_number
+fn deserialize_thought_number<'de, D>(deserializer: D) -> Result<i32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_flexible_int_required(deserializer)
+}
+
+/// Flexible integer deserializer with default for total_thoughts
+fn deserialize_total_thoughts<'de, D>(deserializer: D) -> Result<i32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_flexible_int_required(deserializer)
+}
+
 /// Parameters for the ui_think tool
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UiThinkParams {
@@ -66,14 +94,15 @@ pub struct UiThinkParams {
     pub thought: String,
 
     #[schemars(description = "Current thought number in sequence")]
-    #[serde(deserialize_with = "deserialize_flexible_int_required")]
+    #[serde(deserialize_with = "deserialize_thought_number", default = "default_thought_number")]
     pub thought_number: i32,
 
     #[schemars(description = "Total number of thoughts in sequence")]
-    #[serde(deserialize_with = "deserialize_flexible_int_required")]
+    #[serde(deserialize_with = "deserialize_total_thoughts", default = "default_total_thoughts")]
     pub total_thoughts: i32,
 
     #[schemars(description = "Whether another thought is needed")]
+    #[serde(default = "default_next_thought_needed")]
     pub next_thought_needed: bool,
 
     #[schemars(description = "Optional chain ID to link thoughts together")]
