@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Remote MCP over Streamable HTTP - 2025-08-12
+- Added streamable HTTP server option using `rmcp` 0.5.0 + Axum.
+- New env vars: `UI_TRANSPORT` (`stdio` default or `http`), `UI_HTTP_BIND`, `UI_HTTP_PATH`, `UI_BEARER_TOKEN`.
+- For headerless clients (Claude Desktop), support `?access_token=<token>` query param.
+- Cloudflare tunnel docs and config updated to route public hostname to local bind.
+- Maintains backwards-compatible stdio transport for local development.
+
+### Defaults
+- Changed default instance id to `DT` (was `CC`).
+
 ### ui_remember completion, hybrid scoring, and config presets - 2025-08-10
 - Implemented Redis-only `ui_remember` conversational memory with T1→T2→T3 flow (user, assistant synthesis, metrics).
 - Added objective feedback loop stored at `voice:feedback:{thought2_id}` with fields: synthesis_quality, continued, abandoned, corrected, time_to_next, feedback_score.

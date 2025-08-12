@@ -94,11 +94,17 @@ pub struct UiThinkParams {
     pub thought: String,
 
     #[schemars(description = "Current thought number in sequence")]
-    #[serde(deserialize_with = "deserialize_thought_number", default = "default_thought_number")]
+    #[serde(
+        deserialize_with = "deserialize_thought_number",
+        default = "default_thought_number"
+    )]
     pub thought_number: i32,
 
     #[schemars(description = "Total number of thoughts in sequence")]
-    #[serde(deserialize_with = "deserialize_total_thoughts", default = "default_total_thoughts")]
+    #[serde(
+        deserialize_with = "deserialize_total_thoughts",
+        default = "default_total_thoughts"
+    )]
     pub total_thoughts: i32,
 
     #[schemars(description = "Whether another thought is needed")]

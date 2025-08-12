@@ -16,13 +16,17 @@ use crate::config::Config;
 #[derive(Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub struct UIContextParams {
-    /// "session-summaries" | "important" | "federation" | "help"
-    #[serde(rename = "type", alias = "action", alias = "mode")]
+    /// "federation" | "personal" | "help"
+    #[serde(rename = "type", alias = "action", alias = "mode", alias = "scope")]
     pub kind: String,
 
     /// Required unless type == "help"
-    #[serde(default, alias = "text", alias = "data")]
+    #[serde(default, alias = "text", alias = "data", alias = "content")]
     pub content: String,
+
+    /// Optional category: "session-summary", "decision", "insight", etc.
+    #[serde(default)]
+    pub category: Option<String>,
 
     #[serde(default)]
     pub tags: Vec<String>,
@@ -63,13 +67,12 @@ pub async fn ui_context_impl(
     params: UIContextParams,
 ) -> Result<UIContextResult> {
     let mode_raw = params.kind.trim();
-    
+
     // Normalize common variations
     let mode = match mode_raw.to_lowercase().as_str() {
         "help" => "help",
-        "session-summary" | "session-summaries" | "session" | "summary" => "session-summaries",
-        "important" | "priority" | "critical" => "important",
-        "federation" | "federated" | "team" | "shared" => "federation",
+        "federation" | "federated" | "team" | "shared" | "global" => "federation",
+        "personal" | "local" | "instance" | "private" | "provide" => "personal",
         _ => mode_raw,
     };
 
@@ -86,10 +89,10 @@ pub async fn ui_context_impl(
         });
     }
 
-    // only the three write modes are allowed
+    // only the two write modes are allowed
     ensure!(
-        matches!(mode, "session-summaries" | "important" | "federation"),
-        "unsupported type: {} (expected: session-summaries|important|federation|help). Did you mean one of these?",
+        matches!(mode, "federation" | "personal"),
+        "unsupported type: {} (expected: federation|personal|help). Did you mean one of these?",
         mode_raw
     );
     ensure!(
@@ -115,20 +118,12 @@ pub async fn ui_context_impl(
 
     // --- Key / Index ---
     let (key, index, prefix) = match mode {
-        "session-summaries" => {
+        "personal" => {
             let id = short_hash(&params.content);
             (
-                format!("{instance_id}:embeddings:session-summaries:{id}"),
-                format!("idx:{instance_id}:session-summaries"),
-                format!("{instance_id}:embeddings:session-summaries:"),
-            )
-        }
-        "important" => {
-            let id = short_hash(&params.content);
-            (
-                format!("{instance_id}:embeddings:important:{id}"),
-                format!("idx:{instance_id}:important"),
-                format!("{instance_id}:embeddings:important:"),
+                format!("{instance_id}:embeddings:{id}"),
+                format!("idx:{instance_id}:embeddings"),
+                format!("{instance_id}:embeddings:"),
             )
         }
         "federation" => {
@@ -169,6 +164,7 @@ pub async fn ui_context_impl(
         let mut pipe = redis::pipe();
 
         pipe.hset(&key, "content", &params.content)
+            .hset(&key, "category", params.category.unwrap_or_default())
             .hset(&key, "tags", tags_csv)
             .hset(&key, "importance", params.importance.unwrap_or_default())
             .hset(&key, "chain_id", params.chain_id.unwrap_or_default())
@@ -188,7 +184,7 @@ pub async fn ui_context_impl(
     Ok(UIContextResult {
         mode: mode.into(),
         key: Some(key),
-        index: Some(index),
+        index: Some(index.clone()),
         dims: Some(dims),
         upserted: true,
         created_index,
@@ -201,11 +197,16 @@ pub async fn ui_context_impl(
 #[allow(dead_code)]
 fn help_text() -> String {
     r#"ui_context help:
-- type="session-summaries": subagent/LLM session synthesis → {instance}:embeddings:session-summaries:{id}
-- type="important":        long-running local context → {instance}:embeddings:important:{id}
-- type="federation":       federation-wide context → Federation:embeddings:{id}
+- type="personal":   Local context for this instance → {instance}:embeddings:{id}
+- type="federation": Shared context across all instances → Federation:embeddings:{id}
+- type="help":       Show this help message
+
 Required: content (except for help).
-Optional: tags[], importance, chain_id, thought_id, ttl_seconds, instance_id."#.into()
+Optional: category (e.g., "session-summary", "decision"), tags[], importance, chain_id, thought_id, ttl_seconds, instance_id.
+
+Aliases for type:
+- personal: "local", "instance", "private", "provide"
+- federation: "federated", "team", "shared", "global""#.into()
 }
 
 #[allow(dead_code)]
@@ -282,6 +283,8 @@ async fn ensure_index_if_needed(
         .arg("TAG")
         .arg("SEPARATOR")
         .arg(",")
+        .arg("category")
+        .arg("TEXT")
         .arg("importance")
         .arg("TEXT")
         .arg("ts")

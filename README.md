@@ -14,6 +14,7 @@
   - [Installation](#installation)
   - [Configuration](#configuration)
 - [Usage](#usage)
+  - [Remote MCP (HTTP)](#remote-mcp-http)
   - [Code Examples](#code-examples)
 - [Protocol Overview](#protocol-overview)
 - [Architecture](#architecture)
@@ -91,6 +92,12 @@ Unified Intelligence relies on environment variables for configuration:
 - `REDIS_HOST`: Host for your Redis instance (default: `localhost`).
 - `REDIS_PORT`: Port for your Redis instance (default: `6379`).
 - `QDRANT_SIMILARITY_THRESHOLD`: (Optional) Threshold for Qdrant search results (default: `0.35`).
+ - `INSTANCE_ID`: Instance namespace for storage (default: `DT`).
+
+Remote MCP (HTTP) controls:
+- `UI_TRANSPORT=http` to enable HTTP transport (stdio is default otherwise).
+- `UI_HTTP_BIND` (e.g., `127.0.0.1:8787`) and `UI_HTTP_PATH` (default `/mcp`).
+- `UI_BEARER_TOKEN` to require `Authorization: Bearer <token>`; for headerless clients, `?access_token=<token>` in the URL is supported.
   
 For `ui_remember` hybrid retrieval, you can tune weights via config/env (see sections below).
 
@@ -126,6 +133,16 @@ More details in `docs/ui_remember_config.md` including available presets and pre
 ## Usage
 Unified Intelligence operates as an MCP server. You can interact with it using an MCP client (e.g., Claude Desktop, or a custom client built with `rmcp`).
 
+### Remote MCP (HTTP)
+- Start:
+  - `UI_TRANSPORT=http UI_HTTP_BIND=127.0.0.1:8787 UI_HTTP_PATH=/mcp UI_BEARER_TOKEN=<token> ./target/release/unified-intelligence`
+- Through Cloudflare Tunnel:
+  - Route `mcp.samataganaphotography.com -> http://localhost:8787` in `~/.cloudflared/config.yml`.
+- Claude Desktop URL-only setup:
+  - `https://mcp.samataganaphotography.com/mcp?access_token=<token>`
+- Health check:
+  - `https://mcp.samataganaphotography.com/health`
+
 ### Code Examples
 To start the Unified Intelligence server:
 ```bash
@@ -141,7 +158,7 @@ Unified Intelligence implements the Model Context Protocol (MCP), enabling struc
 
 ## Architecture
 Unified Intelligence follows a modular architecture:
-- **`main.rs`:** Entry point, initializes the MCP server and handlers.
+ - **`main.rs`:** Entry point, initializes the MCP server and handlers; supports `stdio` or streamable HTTP based on `UI_TRANSPORT`.
 - **`service.rs`:** Orchestrates interactions between different components.
 - **`handlers/`:** Contains logic for handling specific MCP tool calls (e.g., `thoughts.rs` for `ui_think`).
 - **`frameworks.rs`:** Defines and implements the various thinking frameworks.

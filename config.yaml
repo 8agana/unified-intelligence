@@ -1,7 +1,7 @@
 server:
   name: unified-intelligence
   version: 3.0.0
-  default_instance_id: CC
+  default_instance_id: DT
 
 redis:
   host: 127.0.0.1

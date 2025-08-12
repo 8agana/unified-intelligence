@@ -1,15 +1,35 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+fn default_empty_string() -> String {
+    String::new()
+}
+
+fn default_thought_number() -> i32 {
+    1
+}
+
+fn default_total_thoughts() -> i32 {
+    1
+}
+
+fn default_next_thought_needed() -> bool {
+    false
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UiRememberParams {
     #[serde(default)]
     pub action: Option<String>,
+    #[serde(default = "default_empty_string")]
     pub thought: String,
+    #[serde(default = "default_thought_number")]
     pub thought_number: i32,
+    #[serde(default = "default_total_thoughts")]
     pub total_thoughts: i32,
     #[serde(default)]
     pub chain_id: Option<String>,
+    #[serde(default = "default_next_thought_needed")]
     #[allow(dead_code)]
     pub next_thought_needed: bool,
 

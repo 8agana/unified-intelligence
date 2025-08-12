@@ -118,7 +118,9 @@ impl Config {
         }
 
         if !env_loaded {
-            tracing::warn!("No .env file found in any expected location - continuing with env vars only");
+            tracing::warn!(
+                "No .env file found in any expected location - continuing with env vars only"
+            );
         }
 
         // Default config path
@@ -127,20 +129,26 @@ impl Config {
         // Load config from file if it exists
         let mut config = if Path::new(&config_path).exists() {
             match fs::read_to_string(&config_path) {
-                Ok(contents) => {
-                    match serde_yaml::from_str::<Config>(&contents) {
-                        Ok(config) => {
-                            tracing::info!("Loaded configuration from {}", config_path);
-                            config
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to parse config file {}: {} - using defaults", config_path, e);
-                            Self::default()
-                        }
+                Ok(contents) => match serde_yaml::from_str::<Config>(&contents) {
+                    Ok(config) => {
+                        tracing::info!("Loaded configuration from {}", config_path);
+                        config
                     }
-                }
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to parse config file {}: {} - using defaults",
+                            config_path,
+                            e
+                        );
+                        Self::default()
+                    }
+                },
                 Err(e) => {
-                    tracing::error!("Failed to read config file {}: {} - using defaults", config_path, e);
+                    tracing::error!(
+                        "Failed to read config file {}: {} - using defaults",
+                        config_path,
+                        e
+                    );
                     Self::default()
                 }
             }
@@ -404,7 +412,7 @@ impl Default for Config {
             server: ServerConfig {
                 name: "unified-intelligence".to_string(),
                 version: "3.0.0".to_string(),
-                default_instance_id: "test".to_string(),
+                default_instance_id: "DT".to_string(),
             },
             redis: RedisConfig {
                 host: "localhost".to_string(),

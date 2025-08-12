@@ -277,7 +277,7 @@ impl UnifiedIntelligenceService {
     }
 
     #[tool(
-        description = "Store UI context (session-summaries|important|federation) or return help"
+        description = "Store UI context (personal|federation) with optional metadata or return help"
     )]
     pub async fn ui_context(
         &self,
@@ -297,8 +297,9 @@ impl UnifiedIntelligenceService {
             let help = serde_json::json!({
                 "tool": "ui_context",
                 "usage": {
-                    "type": "session-summaries|important|federation|help",
+                    "type": "personal|federation|help",
                     "content?": "string (required unless type=help)",
+                    "category?": "string (e.g., session-summary, decision, insight)",
                     "tags?": "string[]",
                     "importance?": "string",
                     "chain_id?": "string",
@@ -306,9 +307,13 @@ impl UnifiedIntelligenceService {
                     "instance_id?": "string",
                     "ttl_seconds?": "number"
                 },
+                "aliases": {
+                    "personal": ["local", "instance", "private", "provide"],
+                    "federation": ["federated", "team", "shared", "global"]
+                },
                 "examples": [
-                    {"type": "session-summaries", "content": "..."},
-                    {"type": "important", "content": "...", "tags": ["project", "priority"]},
+                    {"type": "provide", "content": "Session context", "category": "session-summary"},
+                    {"type": "federation", "content": "Team decision", "category": "decision", "tags": ["architecture"]},
                     {"type": "help"}
                 ],
                 "troubleshooting": [
@@ -357,7 +362,7 @@ impl UnifiedIntelligenceService {
                 "usage": {
                     "action": "search|read|update|delete|help",
                     "query?": "string",
-                    "scope?": "all|session-summaries|important|federation",
+                    "scope?": "all|personal|federation",
                     "filters?": {"tags?": "string[]", "importance?": "string", "chain_id?": "string", "thought_id?": "string"},
                     "options?": {"limit?": "number", "offset?": "number", "k?": "number", "search_type?": "string"},
                     "targets?": {"keys?": "string[]"},
@@ -516,12 +521,9 @@ impl UnifiedIntelligenceService {
         // (key, optional_distance_score, content, ts)
         let mut knn_items: Vec<(String, Option<f64>, String, i64)> = Vec::new();
         if let Ok(openai_key) = self.config.openai.api_key() {
-            if let Ok(embedding) = generate_openai_embedding(
-                &p.thought,
-                &openai_key,
-                &self.handlers.redis_manager,
-            )
-            .await
+            if let Ok(embedding) =
+                generate_openai_embedding(&p.thought, &openai_key, &self.handlers.redis_manager)
+                    .await
             {
                 let dims = self.config.openai.embedding_dimensions;
                 if embedding.len() == dims {
@@ -566,7 +568,8 @@ impl UnifiedIntelligenceService {
                             for (k, _) in &keys_scores {
                                 pipe.cmd("HMGET").arg(k).arg(&fields);
                             }
-                            let rows: Vec<Vec<Option<String>>> = pipe.query_async(&mut *con).await.unwrap_or_default();
+                            let rows: Vec<Vec<Option<String>>> =
+                                pipe.query_async(&mut *con).await.unwrap_or_default();
                             for (i, row) in rows.into_iter().enumerate() {
                                 if i >= keys_scores.len() {
                                     break;
@@ -587,7 +590,9 @@ impl UnifiedIntelligenceService {
                 }
             }
         } else {
-            tracing::warn!("OPENAI_API_KEY not available; skipping KNN vector search for ui_remember");
+            tracing::warn!(
+                "OPENAI_API_KEY not available; skipping KNN vector search for ui_remember"
+            );
         }
         let knn_count = knn_items.len();
         // Simple recency proxy: average age (seconds) of KNN items
