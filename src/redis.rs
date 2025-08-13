@@ -293,7 +293,8 @@ impl RedisManager {
         };
 
         // Execute script
-        let result: String = redis::cmd("EVALSHA")
+        // Try once; on NOSCRIPT, reload scripts and retry once
+        let first_attempt: Result<String> = redis::cmd("EVALSHA")
             .arg(&script_sha)
             .arg(keys.len())
             .arg(&keys)
@@ -302,12 +303,27 @@ impl RedisManager {
             .await
             .map_err(|e| {
                 if e.to_string().contains("NOSCRIPT") {
-                    tracing::warn!("Script not found in cache, reloading...");
-                    UnifiedIntelligenceError::Internal("Script needs reloading".to_string())
+                    UnifiedIntelligenceError::Internal("NOSCRIPT".to_string())
                 } else {
                     UnifiedIntelligenceError::Redis(e)
                 }
-            })?;
+            });
+        let result: String = match first_attempt {
+            Ok(v) => v,
+            Err(UnifiedIntelligenceError::Internal(msg)) if msg == "NOSCRIPT" => {
+                tracing::warn!("Lua script missing (store_thought), reloading and retrying once");
+                self.load_scripts().await?;
+                redis::cmd("EVALSHA")
+                    .arg(&script_sha)
+                    .arg(keys.len())
+                    .arg(&keys)
+                    .arg(&args)
+                    .query_async(&mut *conn)
+                    .await
+                    .map_err(UnifiedIntelligenceError::Redis)?
+            }
+            Err(e) => return Err(e),
+        };
 
         match result.as_str() {
             "OK" => Ok(true),
@@ -334,21 +350,37 @@ impl RedisManager {
             scripts.get_chain_thoughts.clone()
         };
 
-        let result: Vec<String> = redis::cmd("EVALSHA")
+        // Try once; on NOSCRIPT, reload scripts and retry once
+        let first_attempt: Result<Vec<String>> = redis::cmd("EVALSHA")
             .arg(&script_sha)
             .arg(keys.len())
             .arg(&keys)
-            .arg(instance) // ARGV[1]
+            .arg(instance)
             .query_async(&mut *conn)
             .await
             .map_err(|e| {
                 if e.to_string().contains("NOSCRIPT") {
-                    tracing::warn!("Get chain thoughts script not found in cache");
-                    UnifiedIntelligenceError::Internal("Script needs reloading".to_string())
+                    UnifiedIntelligenceError::Internal("NOSCRIPT".to_string())
                 } else {
                     UnifiedIntelligenceError::Redis(e)
                 }
-            })?;
+            });
+        let result: Vec<String> = match first_attempt {
+            Ok(v) => v,
+            Err(UnifiedIntelligenceError::Internal(msg)) if msg == "NOSCRIPT" => {
+                tracing::warn!("Lua script missing (get_chain_thoughts), reloading and retrying once");
+                self.load_scripts().await?;
+                redis::cmd("EVALSHA")
+                    .arg(&script_sha)
+                    .arg(keys.len())
+                    .arg(&keys)
+                    .arg(instance)
+                    .query_async(&mut *conn)
+                    .await
+                    .map_err(UnifiedIntelligenceError::Redis)?
+            }
+            Err(e) => return Err(e),
+        };
 
         Ok(result)
     }
@@ -576,7 +608,8 @@ impl RedisManager {
             scripts.search_thoughts.clone()
         };
 
-        let result: Vec<String> = redis::cmd("EVALSHA")
+        // Try once; on NOSCRIPT, reload scripts and retry once
+        let first_attempt: Result<Vec<String>> = redis::cmd("EVALSHA")
             .arg(&script_sha)
             .arg(keys.len())
             .arg(&keys)
@@ -585,12 +618,27 @@ impl RedisManager {
             .await
             .map_err(|e| {
                 if e.to_string().contains("NOSCRIPT") {
-                    tracing::warn!("RediSearch script not found in cache, reloading...");
-                    UnifiedIntelligenceError::Internal("Script needs reloading".to_string())
+                    UnifiedIntelligenceError::Internal("NOSCRIPT".to_string())
                 } else {
                     UnifiedIntelligenceError::Redis(e)
                 }
-            })?;
+            });
+        let result: Vec<String> = match first_attempt {
+            Ok(v) => v,
+            Err(UnifiedIntelligenceError::Internal(msg)) if msg == "NOSCRIPT" => {
+                tracing::warn!("Lua script missing (search_thoughts), reloading and retrying once");
+                self.load_scripts().await?;
+                redis::cmd("EVALSHA")
+                    .arg(&script_sha)
+                    .arg(keys.len())
+                    .arg(&keys)
+                    .arg(&args)
+                    .query_async(&mut *conn)
+                    .await
+                    .map_err(UnifiedIntelligenceError::Redis)?
+            }
+            Err(e) => return Err(e),
+        };
 
         Ok(result)
     }
