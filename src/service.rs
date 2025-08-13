@@ -41,9 +41,7 @@ pub struct UnifiedIntelligenceService {
 
 impl UnifiedIntelligenceService {
     /// Create a new service instance
-    pub async fn new(
-        redis_manager: Arc<RedisManager>,
-    ) -> Result<Self, UnifiedIntelligenceError> {
+    pub async fn new(redis_manager: Arc<RedisManager>) -> Result<Self, UnifiedIntelligenceError> {
         tracing::info!("Service::new() - Starting initialization");
         // Load configuration
         let config = Arc::new(Config::load());

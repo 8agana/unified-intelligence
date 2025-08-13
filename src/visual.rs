@@ -79,12 +79,6 @@ impl VisualOutput {
         );
     }
 
-    /// Display error messages
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn error(&self, message: &str) {
-        eprintln!("   {} {}", "❌".red(), message.red());
-    }
-
     /// Display search results count
     #[allow(dead_code)]
     pub fn search_results(&self, count: usize, query: &str) {
