@@ -46,12 +46,6 @@ pub enum UnifiedIntelligenceError {
     #[error("Not found: {0}")]
     NotFound(String),
 
-    #[error("Environment variable error: {0}")]
-    EnvVar(String),
-
-    #[error("Configuration error: {0}")]
-    Config(String),
-
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 

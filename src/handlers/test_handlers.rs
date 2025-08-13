@@ -5,8 +5,6 @@ use crate::repository_traits::{KnowledgeRepository, ThoughtRepository};
 
 use async_trait::async_trait;
 use std::boxed::Box;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc; // Add this line
 
 // Manually implement ThoughtRepository for MockCombinedMockRepository
@@ -14,39 +12,39 @@ use std::sync::Arc; // Add this line
 impl ThoughtRepository for MockCombinedMockRepository {
     async fn save_thought(
         &self,
-        thought: &crate::models::ThoughtRecord,
+        _thought: &crate::models::ThoughtRecord,
     ) -> crate::error::Result<()> {
         unimplemented!()
     }
     async fn save_chain_metadata(
         &self,
-        metadata: &crate::models::ChainMetadata,
+        _metadata: &crate::models::ChainMetadata,
     ) -> crate::error::Result<()> {
         unimplemented!()
     }
-    async fn chain_exists(&self, chain_id: &str) -> crate::error::Result<bool> {
+    async fn chain_exists(&self, _chain_id: &str) -> crate::error::Result<bool> {
         unimplemented!()
     }
     async fn get_thought(
         &self,
-        instance: &str,
-        thought_id: &str,
+        _instance: &str,
+        _thought_id: &str,
     ) -> crate::error::Result<Option<crate::models::ThoughtRecord>> {
         unimplemented!()
     }
     async fn get_chain_thoughts(
         &self,
-        instance: &str,
-        chain_id: &str,
+        _instance: &str,
+        _chain_id: &str,
     ) -> crate::error::Result<Vec<crate::models::ThoughtRecord>> {
         unimplemented!()
     }
     async fn search_thoughts(
         &self,
-        instance: &str,
-        query: &str,
-        offset: i64,
-        limit: i64,
+        _instance: &str,
+        _query: &str,
+        _offset: i64,
+        _limit: i64,
     ) -> crate::error::Result<Vec<crate::models::ThoughtRecord>> {
         unimplemented!()
     }
@@ -55,76 +53,76 @@ impl ThoughtRepository for MockCombinedMockRepository {
 // Manually implement KnowledgeRepository for MockCombinedMockRepository
 #[async_trait] // Add this attribute
 impl KnowledgeRepository for MockCombinedMockRepository {
-    async fn create_entity(&self, node: crate::models::KnowledgeNode) -> crate::error::Result<()> {
+    async fn create_entity(&self, _node: crate::models::KnowledgeNode) -> crate::error::Result<()> {
         unimplemented!()
     }
     async fn get_entity(
         &self,
-        id: &str,
-        scope: &crate::models::KnowledgeScope,
+        _id: &str,
+        _scope: &crate::models::KnowledgeScope,
     ) -> crate::error::Result<crate::models::KnowledgeNode> {
         unimplemented!()
     }
     async fn get_entity_by_name(
         &self,
-        name: &str,
-        scope: &crate::models::KnowledgeScope,
+        _name: &str,
+        _scope: &crate::models::KnowledgeScope,
     ) -> crate::error::Result<crate::models::KnowledgeNode> {
         unimplemented!()
     }
-    async fn update_entity(&self, node: crate::models::KnowledgeNode) -> crate::error::Result<()> {
+    async fn update_entity(&self, _node: crate::models::KnowledgeNode) -> crate::error::Result<()> {
         unimplemented!()
     }
     async fn delete_entity(
         &self,
-        id: &str,
-        scope: &crate::models::KnowledgeScope,
+        _id: &str,
+        _scope: &crate::models::KnowledgeScope,
     ) -> crate::error::Result<()> {
         unimplemented!()
     }
     async fn search_entities(
         &self,
-        query: &str,
-        scope: &crate::models::KnowledgeScope,
-        entity_type: Option<&crate::models::EntityType>,
-        limit: usize,
+        _query: &str,
+        _scope: &crate::models::KnowledgeScope,
+        _entity_type: Option<&crate::models::EntityType>,
+        _limit: usize,
     ) -> crate::error::Result<Vec<crate::models::KnowledgeNode>> {
         unimplemented!()
     }
     async fn create_relation(
         &self,
-        relation: crate::models::KnowledgeRelation,
+        _relation: crate::models::KnowledgeRelation,
     ) -> crate::error::Result<()> {
         unimplemented!()
     }
     async fn get_relations(
         &self,
-        entity_id: &str,
-        scope: &crate::models::KnowledgeScope,
+        _entity_id: &str,
+        _scope: &crate::models::KnowledgeScope,
     ) -> crate::error::Result<Vec<crate::models::KnowledgeRelation>> {
         unimplemented!()
     }
     async fn update_name_index(
         &self,
-        name: &str,
-        id: &str,
-        scope: &crate::models::KnowledgeScope,
+        _name: &str,
+        _id: &str,
+        _scope: &crate::models::KnowledgeScope,
     ) -> crate::error::Result<()> {
         unimplemented!()
     }
     async fn set_active_entity(
         &self,
-        session_key: &str,
-        entity_id: &str,
-        scope: &crate::models::KnowledgeScope,
+        _session_key: &str,
+        _entity_id: &str,
+        _scope: &crate::models::KnowledgeScope,
     ) -> crate::error::Result<()> {
         unimplemented!()
     }
     async fn add_thought_to_entity(
         &self,
-        entity_name: &str,
-        thought_id: &str,
-        scope: &crate::models::KnowledgeScope,
+        _entity_name: &str,
+        _thought_id: &str,
+        _scope: &crate::models::KnowledgeScope,
     ) -> crate::error::Result<()> {
         unimplemented!()
     }

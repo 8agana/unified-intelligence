@@ -16,7 +16,4 @@ impl Default for RetryPolicy {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tokio::test;
-}
+mod tests {}

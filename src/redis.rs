@@ -86,7 +86,8 @@ impl RedisManager {
         Ok(())
     }
 
-    /// Get a JSON object from Redis
+    /// Get a JSON object from Redis.
+    /// This handles the specific case where RedisJSON returns an array for the root path (`$`).
     pub async fn json_get<T: serde::de::DeserializeOwned>(
         &self,
         key: &str,
@@ -94,37 +95,33 @@ impl RedisManager {
     ) -> Result<Option<T>> {
         let mut conn = self.get_connection().await?;
 
-        // Use raw command to handle RedisJSON response
+        // We use a raw command here because the `redis` crate's `json_get` helper
+        // has trouble deserializing when the root path `$` returns an array `[T]`
+        // but the expected type `T` is not a Vec.
         let result: Option<String> = redis::cmd("JSON.GET")
             .arg(key)
             .arg(path)
             .query_async(&mut *conn)
             .await?;
 
-        match result {
-            Some(json_str) => {
-                // When using "$" path, RedisJSON returns an array
-                if path == "$" {
-                    // Parse as array and get first element
-                    if let Ok(values) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
-                        if let Some(first_value) = values.first() {
-                            let value = serde_json::from_value(first_value.clone())?;
-                            Ok(Some(value))
-                        } else {
-                            Ok(None)
-                        }
-                    } else {
-                        // Try parsing directly if not an array
-                        let value = serde_json::from_str(&json_str)?;
-                        Ok(Some(value))
-                    }
-                } else {
-                    // For other paths, parse directly
-                    let value = serde_json::from_str(&json_str)?;
-                    Ok(Some(value))
-                }
+        let Some(json_str) = result else {
+            return Ok(None);
+        };
+
+        // If the path is the root, RedisJSON wraps the result in an array.
+        // We attempt to parse it as a single-element array first.
+        if path == "$" {
+            if let Ok(mut wrapper) = serde_json::from_str::<Vec<T>>(&json_str) {
+                // If parsing as Vec<T> works, return the first element.
+                return Ok(wrapper.pop());
             }
-            None => Ok(None),
+        }
+
+        // For all other paths, or if the root path query was not an array
+        // (e.g., if T is already a Vec), parse directly.
+        match serde_json::from_str(&json_str) {
+            Ok(value) => Ok(Some(value)),
+            Err(e) => Err(e.into()),
         }
     }
 
