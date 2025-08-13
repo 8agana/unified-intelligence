@@ -24,13 +24,14 @@
 - [Links](#links)
 
 ## Introduction
-Unified Intelligence is a Rust-based Model Context Protocol (MCP) server designed to enhance cognitive capabilities by processing and synthesizing thoughts using various thinking frameworks. It integrates with external services like Groq for advanced language model capabilities, OpenAI for embeddings, and Qdrant for vector-based memory storage and retrieval. This project aims to provide a robust and extensible backend for intelligent agents and applications.
+Unified Intelligence is a Rust-based Model Context Protocol (MCP) server designed to enhance cognitive capabilities by processing and synthesizing thoughts using various thinking frameworks. It integrates with external services like Groq for advanced language model capabilities and OpenAI for embeddings. Vector storage is Redis-only.
 
 ## Features
 - **Thinking Frameworks:** Implements various cognitive frameworks (OODA, Socratic, First Principles, Systems, Root Cause, SWOT, Remember) to guide thought processing.
 - **Groq Integration:** Leverages Groq's powerful language models for natural language understanding, search query parsing, and intelligent response synthesis from retrieved memories.
 - **Conversational Memory (Redis-only):** `ui_remember` stores and retrieves all memory in Redis, performing hybrid retrieval (text + KNN via RediSearch) and recording objective feedback metrics.
-- **Vector Memory (Qdrant):** Qdrant integration remains available for other features, but `ui_remember` operates Redis-only by design.
+  
+  Redis-only storage: This project does not use Qdrant.
 - **Embeddings (OpenAI):** Generates vector embeddings for thoughts and queries using OpenAI's embedding models, enabling semantic search.
 - **Redis Persistence:** Stores thought records, chain metadata, and feedback loop metadata in Redis for efficient data management.
 - **Extensible Design:** Modular architecture allows for easy extension with new frameworks, integrations, and functionalities.
@@ -42,7 +43,7 @@ Unified Intelligence is built with and integrates the following key technologies
 - **`rmcp`:** Rust Model Context Protocol SDK for MCP communication.
 - **`tokio`:** Asynchronous runtime for efficient I/O operations.
 - **Groq API:** For advanced language model capabilities.
-- **Qdrant:** Vector database for semantic memory storage and retrieval.
+- Redis-only: no Qdrant dependency.
 - **Redis:** In-memory data store for thought persistence and metadata.
 - **OpenAI API:** For generating vector embeddings.
 - **`tracing`:** For structured logging and observability.
@@ -57,7 +58,7 @@ Unified Intelligence is built with and integrates the following key technologies
 ### Prerequisites
 - Rust (1.88.0 or later)
 - Cargo (Rust's package manager)
-- Docker (for running Redis and Qdrant)
+- Docker (for running Redis)
 - Groq API Key (set as `GROQ_API_KEY` environment variable)
 - OpenAI API Key (set as `OPENAI_API_KEY` environment variable)
 
@@ -67,7 +68,7 @@ Unified Intelligence is built with and integrates the following key technologies
     git clone https://github.com/your-repo/unified-intelligence.git
     cd unified-intelligence
     ```
-2.  **Set up Redis and Qdrant (using Docker Compose):**
+2.  **Set up Redis (using Docker Compose):**
     ```bash
     # Assuming you have a docker-compose.yml in your Memory directory
     # Navigate to the Memory directory and start services
@@ -87,12 +88,10 @@ Unified Intelligence is built with and integrates the following key technologies
 Unified Intelligence relies on environment variables for configuration:
 - `GROQ_API_KEY`: Your API key for Groq services.
 - `OPENAI_API_KEY`: Your API key for OpenAI embedding services.
-- `QDRANT_HOST`: Host for your Qdrant instance (default: `localhost`).
-- `QDRANT_PORT`: Port for your Qdrant instance (default: `6334`).
+- (Qdrant variables removed; not used.)
 - `REDIS_HOST`: Host for your Redis instance (default: `localhost`).
 - `REDIS_PORT`: Port for your Redis instance (default: `6379`).
-- `QDRANT_SIMILARITY_THRESHOLD`: (Optional) Threshold for Qdrant search results (default: `0.35`).
- - `INSTANCE_ID`: Instance namespace for storage (default: `DT`).
+- `INSTANCE_ID`: Instance namespace for storage (default: `DT`).
 
 Remote MCP (HTTP) controls:
 - `UI_TRANSPORT=http` to enable HTTP transport (stdio is default otherwise).
@@ -164,7 +163,7 @@ Unified Intelligence follows a modular architecture:
 - **`frameworks.rs`:** Defines and implements the various thinking frameworks.
 - **`groq.rs`:** Encapsulates Groq API interactions.
 - **`embeddings.rs`:** Handles OpenAI embedding generation.
-- **`qdrant_service.rs`:** Manages connections and operations with the Qdrant vector database.
+- `qdrant_service.rs`: removed; Redis-only memory.
 - **`repository.rs`:** Defines the `ThoughtRepository` trait for data persistence.
 - **`redis.rs`:** Implements Redis-specific data storage and retrieval.
 - **`models.rs`:** Defines data structures used across the application.
@@ -186,7 +185,7 @@ cargo test
 
 ## Troubleshooting
 - **API Key Errors:** Ensure `GROQ_API_KEY` and `OPENAI_API_KEY` environment variables are correctly set.
-- **Connection Issues:** Verify that Redis and Qdrant Docker containers are running and accessible on the configured hosts and ports. Check firewall settings if necessary.
+- **Connection Issues:** Verify that Redis is running and accessible on the configured host and port. Check firewall settings if necessary.
 - **Compilation Errors:** Refer to the Rust compiler's error messages for guidance. Use `cargo fix` and `cargo check` for assistance.
 - **Unexpected Behavior:** Review `tracing` logs for detailed insights into application flow and potential issues.
 

@@ -1,6 +1,5 @@
 use super::*;
 use crate::config::Config;
-use crate::qdrant_service::{MockQdrantServiceTrait, QdrantServiceTrait};
 use crate::redis::RedisManager;
 use crate::repository_traits::{KnowledgeRepository, ThoughtRepository};
 
@@ -152,8 +151,6 @@ async fn create_test_handler() -> Option<ToolHandlers<MockCombinedMockRepository
             return None;
         }
     };
-
-    let qdrant_service = Arc::new(MockQdrantServiceTrait::new());
 
     Some(ToolHandlers::new(
         repository,

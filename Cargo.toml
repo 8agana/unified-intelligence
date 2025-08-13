@@ -42,7 +42,6 @@ tower = "0.5"
 # HTTP client for Groq API
 reqwest = { version = "0.11", features = ["json"] }
 async-openai = { version = "0.18" }
-qdrant-client = "1.9.0"
 
 # Circuit breaker and retry dependencies
 tokio-retry = "0.3"

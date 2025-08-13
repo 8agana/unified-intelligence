@@ -17,7 +17,6 @@ use crate::handlers::recall::UiRecallParams;
 use crate::handlers::thoughts::ThoughtsHandler;
 use crate::models::UiKnowledgeParams;
 use crate::models::UiThinkParams;
-use crate::qdrant_service::QdrantServiceTrait;
 use crate::rate_limit::RateLimiter;
 use crate::redis::RedisManager;
 use crate::repository::CombinedRedisRepository;
@@ -37,15 +36,13 @@ pub struct UnifiedIntelligenceService {
     rate_limiter: Arc<RateLimiter>,
     instance_id: String,
     config: Arc<Config>,
-    #[allow(dead_code)]
-    qdrant_service: Arc<dyn QdrantServiceTrait>,
+    // Qdrant removed; Redis is the sole storage backend
 }
 
 impl UnifiedIntelligenceService {
     /// Create a new service instance
     pub async fn new(
         redis_manager: Arc<RedisManager>,
-        qdrant_service: Arc<dyn QdrantServiceTrait>,
     ) -> Result<Self, UnifiedIntelligenceError> {
         tracing::info!("Service::new() - Starting initialization");
         // Load configuration
@@ -109,7 +106,6 @@ impl UnifiedIntelligenceService {
             rate_limiter,
             instance_id,
             config,
-            qdrant_service,
         })
     }
 }

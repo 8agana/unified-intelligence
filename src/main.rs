@@ -30,7 +30,6 @@ mod handlers;
 mod intent;
 mod lua_scripts;
 mod models;
-mod qdrant_service; // New module
 mod rate_limit;
 mod redis;
 mod repository;
@@ -44,7 +43,6 @@ mod validation;
 mod visual;
 
 use crate::config::Config; // Import Config
-use crate::qdrant_service::QdrantService;
 use crate::redis::RedisManager;
 use crate::service::UnifiedIntelligenceService;
 use std::sync::Arc; // Import Arc
@@ -64,13 +62,8 @@ async fn main() -> Result<()> {
     // Initialize RedisManager
     let redis_manager = Arc::new(RedisManager::new_with_config(&config).await?);
 
-    // Initialize QdrantService
-    let instance_id =
-        std::env::var("INSTANCE_ID").unwrap_or_else(|_| config.server.default_instance_id.clone());
-    let qdrant_service = QdrantService::new(&instance_id).await?;
-
-    let service =
-        UnifiedIntelligenceService::new(redis_manager.clone(), Arc::new(qdrant_service)).await?;
+    // Create service (no Qdrant dependency)
+    let service = UnifiedIntelligenceService::new(redis_manager.clone()).await?;
 
     // Choose transport: stdio (default) or http
     let transport = std::env::var("UI_TRANSPORT").unwrap_or_else(|_| "stdio".to_string());

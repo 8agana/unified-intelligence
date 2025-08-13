@@ -14,7 +14,6 @@ pub struct Config {
     pub bloom_filter: BloomFilterConfig,
     pub time_series: TimeSeriesConfig,
     pub retry: RetryConfig,
-    pub qdrant: QdrantConfig,
     pub groq: GroqConfig,
     pub openai: OpenAIConfig,
     pub redis_search: RedisSearchConfig,
@@ -78,15 +77,7 @@ pub struct RetryConfig {
     pub jitter_factor: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QdrantConfig {
-    /// Similarity score threshold for filtering search results (0.0-1.0)
-    pub similarity_threshold: f32,
-    /// Host for Qdrant server
-    pub host: String,
-    /// Port for Qdrant server
-    pub port: u16,
-}
+// Qdrant removed from configuration
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroqConfig {
@@ -231,20 +222,7 @@ impl Config {
             }
         }
 
-        // Qdrant overrides
-        if let Ok(threshold) = env::var("QDRANT_SIMILARITY_THRESHOLD") {
-            if let Ok(threshold_val) = threshold.parse() {
-                self.qdrant.similarity_threshold = threshold_val;
-            }
-        }
-        if let Ok(host) = env::var("QDRANT_HOST") {
-            self.qdrant.host = host;
-        }
-        if let Ok(port) = env::var("QDRANT_PORT") {
-            if let Ok(port_num) = port.parse() {
-                self.qdrant.port = port_num;
-            }
-        }
+        // Qdrant removed: no overrides
 
         // Groq overrides
         if let Ok(api_key) = env::var("GROQ_API_KEY") {
@@ -306,13 +284,7 @@ impl Config {
             return Err("Retry jitter factor must be between 0.0 and 1.0".into());
         }
 
-        // Validate Qdrant configuration
-        if self.qdrant.similarity_threshold < 0.0 || self.qdrant.similarity_threshold > 1.0 {
-            return Err("Qdrant similarity threshold must be between 0.0 and 1.0".into());
-        }
-        if self.qdrant.port == 0 {
-            return Err("Qdrant port cannot be 0".into());
-        }
+        // Qdrant removed: no validation required
 
         // Validate Groq API key
         if self.groq.api_key == "PLACEHOLDER_GROQ_API_KEY" || self.groq.api_key.is_empty() {
@@ -448,11 +420,6 @@ impl Default for Config {
                 max_delay_ms: 5000,
                 backoff_base: 2.0,
                 jitter_factor: 0.1,
-            },
-            qdrant: QdrantConfig {
-                similarity_threshold: 0.35,
-                host: "localhost".to_string(),
-                port: 6334,
             },
             groq: GroqConfig {
                 api_key: env::var("GROQ_API_KEY").unwrap_or_else(|_| {

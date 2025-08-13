@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 - Source in `src/`: `main.rs` (binary) and `lib.rs` (library).
 - MCP handlers in `src/handlers/`: `ui_think`, `ui_recall`, `ui_help`, `ui_knowledge`.
-- Supporting modules: `frameworks.rs`, `service.rs`, `repository*.rs`, `qdrant_service.rs`, `redis.rs`, `embeddings.rs`, `models.rs`, `validation.rs`, `visual.rs`, `transport.rs`.
+- Supporting modules: `frameworks.rs`, `service.rs`, `repository*.rs`, `redis.rs`, `embeddings.rs`, `models.rs`, `validation.rs`, `visual.rs`, `transport.rs`.
 - Config at repo root: `config.yaml` (Redis/Qdrant, rate limits, model settings).
 - Tests are colocated with code, e.g., `src/handlers/test_handlers.rs`.
 
@@ -27,6 +27,13 @@
 - Claude Desktop: paste `https://<host>/mcp?access_token=TOKEN`.
 - Cloudflare: map hostname to the local bind (e.g., `mcp.samataganaphotography.com -> http://localhost:8787`).
 
+## Redis Data Model
+- **Current state:** Mixed usage of Redis types — RedisJSON (thoughts/entities), Hashes (context/memory indexes), Strings/Binary (embedding cache), and Streams (events).
+- **RediSearch:** Presently targets Hash records; Lua helpers sometimes fetch JSON docs after search.
+- **Guidance:** For new features, prefer RedisJSON for primary records; keep type usage consistent within a feature.
+- **Migration option:** Consider standardizing to RedisJSON-only with JSON-backed RediSearch indexes; add a background migrator for existing Hash data.
+- **Action item:** Document key schemas and decide standardization timeline before expanding memory features.
+
 ## Testing Guidelines
 - Use `#[test]` unit tests colocated with code; group under `mod tests`.
 - Name tests `test_*`; mock/gate external deps (Redis, Qdrant, network).
@@ -40,4 +47,4 @@
 
 ## Security & Configuration Tips
 - Never hardcode secrets; use env vars (`GROQ_API_KEY`, `OPENAI_API_KEY`), optionally via `dotenvy`.
-- Tune Redis/Qdrant settings, similarity thresholds, and limits in `config.yaml`.
+- Tune Redis settings and limits in `config.yaml`.

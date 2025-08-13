@@ -14,12 +14,7 @@ redis:
     create_timeout_seconds: 5
     recycle_timeout_seconds: 5
 
-qdrant:
-  host: 127.0.0.1
-  port: 6334
-  timeout_seconds: 30
-  collection_name: unified_thoughts
-  similarity_threshold: 0.35
+# Qdrant removed; Redis-only storage
 
 rate_limiter:
   max_requests: 100
