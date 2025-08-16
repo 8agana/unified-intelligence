@@ -434,8 +434,22 @@ impl UnifiedIntelligenceService {
             return Ok(CallToolResult::success(vec![content]));
         }
 
+        // Normalize action: default to query; allow feedback aliases
+        fn parse_action(action: &Option<String>, has_feedback: bool) -> &'static str {
+            if has_feedback {
+                return "feedback";
+            }
+            let a = action.as_deref().unwrap_or("query").to_ascii_lowercase();
+            let norm: String = a.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+            match norm.as_str() {
+                "feedback" | "fb" | "critique" | "review" => "feedback",
+                _ => "query",
+            }
+        }
+        let action = parse_action(&p.action, p.feedback.is_some());
+
         // If this is an explicit feedback call, store Thought 3 (feedback) and return
-        if matches!(p.action.as_deref(), Some("feedback")) || p.feedback.is_some() {
+        if action == "feedback" {
             let chain_id = p.chain_id.clone().ok_or_else(|| {
                 ErrorData::invalid_params("chain_id is required for feedback".to_string(), None)
             })?;
@@ -495,6 +509,16 @@ impl UnifiedIntelligenceService {
             let result = UiRememberResult {
                 status: "feedback_saved".to_string(),
                 thought3_id: Some(thought3_id),
+                next_action: if p.continue_next.unwrap_or(false) {
+                    Some(crate::tools::ui_remember::NextAction {
+                        tool: "ui_remember".to_string(),
+                        action: "query".to_string(),
+                        required: vec!["chain_id".to_string(), "thought".to_string()],
+                        optional: vec!["style".to_string(), "tags".to_string()],
+                    })
+                } else {
+                    None
+                },
                 ..Default::default()
             };
             let ack = Content::text(
@@ -546,12 +570,27 @@ impl UnifiedIntelligenceService {
         }
 
         // 2) Store Thought 1 (user query)
+        // Ensure chain_id exists; mint if missing; derive numbering from chain
+        let chain_id = if let Some(c) = p.chain_id.clone() {
+            c
+        } else {
+            format!("remember:{}", uuid::Uuid::new_v4())
+        };
+        let last_n = match self
+            .handlers
+            .repository
+            .get_chain_thoughts(&self.instance_id, &chain_id)
+            .await
+        {
+            Ok(v) => v.into_iter().map(|t| t.thought_number).max().unwrap_or(0),
+            Err(_) => 0,
+        };
         let t1 = crate::models::ThoughtRecord::new(
             self.instance_id.clone(),
             p.thought.clone(),
-            p.thought_number,
-            p.total_thoughts,
-            p.chain_id.clone(),
+            last_n + 1,
+            last_n + 2,
+            Some(chain_id.clone()),
             true, // we know we'll produce at least one more thought
             Some("ui_remember".to_string()),
             None,
@@ -793,9 +832,9 @@ impl UnifiedIntelligenceService {
         let t2 = crate::models::ThoughtRecord::new(
             self.instance_id.clone(),
             synthesized.text.clone(),
-            p.thought_number + 1,
-            p.total_thoughts.max(2),
-            p.chain_id.clone(),
+            last_n + 2,
+            last_n + 2,
+            Some(chain_id.clone()),
             true, // a later metrics/feedback thought or next user thought
             Some("ui_remember".to_string()),
             None,
@@ -832,12 +871,18 @@ impl UnifiedIntelligenceService {
             assistant_text: Some(synthesized.text.clone()),
             retrieved_text_count: Some(retrieved.len()),
             retrieved_embedding_count: Some(knn_count),
+            next_action: Some(crate::tools::ui_remember::NextAction {
+                tool: "ui_remember".to_string(),
+                action: "feedback".to_string(),
+                required: vec!["chain_id".to_string(), "feedback".to_string()],
+                optional: vec!["continue_next".to_string()],
+            }),
         };
 
         // Return assistant response and a feedback prompt
         let text_part = Content::text(synthesized.text.clone());
         let prompt = Content::text(
-            "Provide feedback via ui_remember with action=\"feedback\" and feedback: <your critique>. Optionally include continue_next=true to proceed.",
+            "Provide feedback via ui_remember {action:\"feedback\", chain_id, feedback, continue_next?}.",
         );
         let json_part = Content::json(result)
             .map_err(|e| ErrorData::internal_error(format!("JSON encode error: {e}"), None))?;

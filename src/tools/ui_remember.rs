@@ -79,4 +79,15 @@ pub struct UiRememberResult {
     pub retrieved_text_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retrieved_embedding_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_action: Option<NextAction>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+pub struct NextAction {
+    pub tool: String,
+    pub action: String,
+    pub required: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub optional: Vec<String>,
 }
