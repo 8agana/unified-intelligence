@@ -754,7 +754,7 @@ impl UnifiedIntelligenceService {
             p.thought_number + 2,
             p.total_thoughts.max(3),
             p.chain_id.clone(),
-            true,
+            false, // metrics/feedback concludes this step; caller can decide to continue
             Some("ui_remember".to_string()),
             None,
             None,
@@ -791,9 +791,11 @@ impl UnifiedIntelligenceService {
             retrieved_embedding_count: Some(knn_count),
         };
 
-        let content = Content::json(result)
+        // Return both: human-displayable text and machine-readable JSON
+        let text_part = Content::text(synthesized.text);
+        let json_part = Content::json(result)
             .map_err(|e| ErrorData::internal_error(format!("JSON encode error: {e}"), None))?;
-        Ok(CallToolResult::success(vec![content]))
+        Ok(CallToolResult::success(vec![text_part, json_part]))
     }
 }
 
