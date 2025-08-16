@@ -27,12 +27,28 @@
 - Claude Desktop: paste `https://<host>/mcp?access_token=TOKEN`.
 - Cloudflare: map hostname to the local bind (e.g., `mcp.samataganaphotography.com -> http://localhost:8787`).
 
+## Current MCP Tools
+- `ui_think`: Capture and process thoughts with optional chaining and frameworks.
+- `ui_recall`: Retrieve a single thought by ID or all thoughts in a chain.
+- `ui_help`: Usage, parameters, and examples for tools/frameworks.
+- `ui_knowledge`: CRUD + relations for a Redis-backed knowledge graph.
+- `ui_context`: Store short-lived personal/federation context with embeddings.
+- `ui_memory`: Search/read/update/delete memory using RediSearch + filters.
+- `ui_remember`: Conversational memory with assistant synthesis and feedback metrics.
+
 ## Redis Data Model
 - **Current state:** Mixed usage of Redis types — RedisJSON (thoughts/entities), Hashes (context/memory indexes), Strings/Binary (embedding cache), and Streams (events).
 - **RediSearch:** Presently targets Hash records; Lua helpers sometimes fetch JSON docs after search.
 - **Guidance:** For new features, prefer RedisJSON for primary records; keep type usage consistent within a feature.
 - **Migration option:** Consider standardizing to RedisJSON-only with JSON-backed RediSearch indexes; add a background migrator for existing Hash data.
 - **Action item:** Document key schemas and decide standardization timeline before expanding memory features.
+
+## Known Issues
+- Build currently fails on `src/frameworks.rs` due to type/variant mismatches (`ThinkingFramework` vs `ThinkingMode`, variant casing). Fix planned on branch `framework-refactor`.
+- Some docs referenced files have been reorganized; Groq integration now lives in `transport.rs`, `intent.rs`, and `synth.rs`.
+
+## Next Steps
+- Create and use a worktree/branch `framework-refactor` to correct framework enums, naming, and handler integration, then restore `cargo check`/tests and clippy to green.
 
 ## Testing Guidelines
 - Use `#[test]` unit tests colocated with code; group under `mod tests`.

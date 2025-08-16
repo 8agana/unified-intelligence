@@ -24,10 +24,10 @@
 - [Links](#links)
 
 ## Introduction
-Unified Intelligence is a Rust-based Model Context Protocol (MCP) server designed to enhance cognitive capabilities by processing and synthesizing thoughts using various thinking frameworks. It integrates with external services like Groq for advanced language model capabilities and OpenAI for embeddings. Vector storage is Redis-only.
+Unified Intelligence is a Rust-based Model Context Protocol (MCP) server. It stores and recalls structured “thoughts”, supports multiple thinking frameworks, and exposes additional memory/context tools over stdio or HTTP. Storage is Redis-only, with OpenAI embeddings and Groq for intent parsing and synthesis.
 
 ## Features
-- **Thinking Frameworks:** Implements various cognitive frameworks (OODA, Socratic, First Principles, Systems, Root Cause, SWOT, Remember) to guide thought processing.
+- **Thinking Frameworks:** Implements multiple cognitive frameworks (OODA, Socratic, First Principles, Systems, Root Cause, SWOT) to guide thought processing for `ui_think`.
 - **Groq Integration:** Leverages Groq's powerful language models for natural language understanding, search query parsing, and intelligent response synthesis from retrieved memories.
 - **Conversational Memory (Redis-only):** `ui_remember` stores and retrieves all memory in Redis, performing hybrid retrieval (text + KNN via RediSearch) and recording objective feedback metrics.
   
@@ -38,9 +38,9 @@ Unified Intelligence is a Rust-based Model Context Protocol (MCP) server designe
 - **Visual Feedback:** Provides real-time visual feedback on thought processing and framework application.
 
 ## Tools
-Unified Intelligence is built with and integrates the following key technologies:
+Unified Intelligence is built with and integrates the following:
 - **Rust:** The core programming language for performance and safety.
-- **`rmcp`:** Rust Model Context Protocol SDK for MCP communication.
+- **`rmcp`:** Rust Model Context Protocol SDK for MCP communication (stdio or streamable HTTP).
 - **`tokio`:** Asynchronous runtime for efficient I/O operations.
 - **Groq API:** For advanced language model capabilities.
 - Redis-only: no Qdrant dependency.
@@ -50,8 +50,17 @@ Unified Intelligence is built with and integrates the following key technologies
 - **`colored`:** For enhanced terminal output.
 
 ### Version Compatibility
-- **`rmcp` Version:** This project now uses `rmcp` version `0.5.0`.
-- **Protocol Version:** Supports protocol version `2024-11-05`.
+- **`rmcp`:** 0.5.x
+- **MCP Protocol:** 2024-11-05
+
+## MCP Tools
+- `ui_think`: Capture/process a thought, optionally chained, with an optional thinking framework.
+- `ui_recall`: Retrieve a single thought by ID or all thoughts in a chain.
+- `ui_help`: Built-in usage and examples for tools and frameworks.
+- `ui_knowledge`: Manage entities and relations in a simple knowledge graph (Redis-backed).
+- `ui_context`: Store short-lived personal/federation context with embeddings and RediSearch indexing.
+- `ui_memory`: Search/read/update/delete memory across embeddings and text with simple filters.
+- `ui_remember`: Conversational memory flow: T1 user thought -> T2 assistant synthesis -> T3 objective feedback metrics.
 
 ## Getting Started
 
@@ -79,7 +88,7 @@ Unified Intelligence is built with and integrates the following key technologies
     ```bash
     cargo build --release
     ```
-4.  **Run tests (optional but recommended):**
+4.  **Run tests (optional, gated to avoid live deps):**
     ```bash
     cargo test
     ```
@@ -142,34 +151,27 @@ Unified Intelligence operates as an MCP server. You can interact with it using a
 - Health check:
   - `https://mcp.samataganaphotography.com/health`
 
-### Code Examples
-To start the Unified Intelligence server:
-```bash
-./target/release/unified-intelligence
-```
-(Further usage examples would depend on the specific MCP client being used and the tools exposed by the server.)
+### Quick Start
+- Stdio (default): `./target/release/unified-intelligence`
+- HTTP: `UI_TRANSPORT=http UI_HTTP_BIND=127.0.0.1:8787 ./target/release/unified-intelligence`
 
 ## Protocol Overview
 Unified Intelligence implements the Model Context Protocol (MCP), enabling structured communication with AI agents. It exposes tools for:
 - **`ui_think`:** The primary tool for processing thoughts through various frameworks.
-- **`ui_recall`:** (Planned/Implemented in `recall.rs`) For retrieving memories based on specific criteria.
-- Other custom tools as defined in the `handlers` module.
+- **`ui_recall`:** Retrieve a single thought or a chain’s thoughts.
+- Additional tools listed above in MCP Tools.
 
 ## Architecture
 Unified Intelligence follows a modular architecture:
- - **`main.rs`:** Entry point, initializes the MCP server and handlers; supports `stdio` or streamable HTTP based on `UI_TRANSPORT`.
-- **`service.rs`:** Orchestrates interactions between different components.
-- **`handlers/`:** Contains logic for handling specific MCP tool calls (e.g., `thoughts.rs` for `ui_think`).
-- **`frameworks.rs`:** Defines and implements the various thinking frameworks.
-- **`groq.rs`:** Encapsulates Groq API interactions.
-- **`embeddings.rs`:** Handles OpenAI embedding generation.
-- `qdrant_service.rs`: removed; Redis-only memory.
-- **`repository.rs`:** Defines the `ThoughtRepository` trait for data persistence.
-- **`redis.rs`:** Implements Redis-specific data storage and retrieval.
-- **`models.rs`:** Defines data structures used across the application.
-- **`error.rs`:** Custom error types.
-- **`validation.rs`:** Input validation logic.
-- **`visual.rs`:** Handles terminal output and visual feedback.
+ - `main.rs`: Entry point, initializes the MCP server and handles stdio/HTTP transport.
+ - `service.rs`: Tool router via `rmcp_macros`; rate limiting; delegates to handlers and tools.
+ - `handlers/`: MCP tool handlers (`thoughts.rs`, `recall.rs`, `help.rs`, `knowledge.rs`).
+ - `frameworks.rs`: Thinking frameworks and visuals used by `ui_think`.
+ - `transport.rs`: Groq transport client; retries/backoff.
+ - `synth.rs` and `intent.rs`: Groq synthesis and intent parsing.
+ - `embeddings.rs`: OpenAI embedding generation utilities.
+ - `repository*.rs` and `redis.rs`: Redis-backed repositories and managers.
+ - `models.rs`, `error.rs`, `validation.rs`, `visual.rs`: Core types, errors, validation, and TTY visuals.
 
 ## Extending and Customizing
 - **Adding New Thinking Frameworks:** Define new variants in `ThinkingFramework` enum (`frameworks.rs`) and implement their processing logic in `FrameworkProcessor`.
@@ -188,6 +190,10 @@ cargo test
 - **Connection Issues:** Verify that Redis is running and accessible on the configured host and port. Check firewall settings if necessary.
 - **Compilation Errors:** Refer to the Rust compiler's error messages for guidance. Use `cargo fix` and `cargo check` for assistance.
 - **Unexpected Behavior:** Review `tracing` logs for detailed insights into application flow and potential issues.
+
+### Known Issues
+- Current `cargo check` fails due to type/variant mismatches in `src/frameworks.rs` (e.g., `ThinkingFramework` vs `ThinkingMode`, and enum variant casing). Planned fix on branch `framework-refactor`.
+- Tests are designed to skip live Redis if unavailable, but logs may mention connection attempts.
 
 ## Links
 - [CHANGELOG.md](CHANGELOG.md)
