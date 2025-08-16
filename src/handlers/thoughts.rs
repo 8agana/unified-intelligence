@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::frameworks::{FrameworkProcessor, FrameworkVisual, ThinkingFramework};
+use crate::frameworks::{FrameworkProcessor, FrameworkVisual, ThinkingMode, WorkflowState};
 use crate::models::{ChainMetadata, ThinkResponse, ThoughtRecord, UiThinkParams};
 use crate::repository_traits::{KnowledgeRepository, ThoughtRepository};
 
@@ -12,40 +12,26 @@ pub trait ThoughtsHandler {
 impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::ToolHandlers<R> {
     /// Handle ui_think tool
     async fn ui_think(&self, params: UiThinkParams) -> Result<ThinkResponse> {
-        // Determine framework with graceful fallback to Socratic on invalid
-        let framework = if let Some(ref framework_str) = params.framework {
-            // Use safe parsing that defaults to Socratic on invalid input
-            let parsed = ThinkingFramework::from_string_safe(framework_str);
+        // Use parsed, forgiving framework_state (defaults to Conversation)
+        let state: WorkflowState = params.framework_state;
 
-            // Log a warning if the framework was invalid but continue with default
-            if ThinkingFramework::from_string(framework_str).is_err() {
-                tracing::warn!(
-                    "Invalid framework '{}' provided, defaulting to Socratic",
-                    framework_str
-                );
-                // Note: Using info log instead of visual warning since visual doesn't have warning method
-                tracing::info!(
-                    "Framework '{}' not recognized, using Socratic default",
-                    framework_str
-                );
-            }
-
-            parsed
-        } else {
-            ThinkingFramework::Socratic
-        };
+        // Show framework banner and choose a thinking mode based on state (first recommended), if any
+        self.visual.framework_state(state);
+        // Choose a thinking mode based on state (first recommended), if any
+        let chosen_mode: Option<ThinkingMode> = state.thinking_modes().first().copied();
 
         // Display visual start with framework
         self.visual
             .thought_start(params.thought_number, params.total_thoughts);
-        FrameworkVisual::display_framework_start(&framework);
+        if let Some(mode) = chosen_mode {
+            FrameworkVisual::display_framework_start(&mode);
+        }
         self.visual.thought_content(&params.thought);
 
         // Process through framework
-        if framework != ThinkingFramework::Socratic {
-            let processor = FrameworkProcessor::new(framework.clone());
+        if let Some(mode) = chosen_mode {
+            let processor = FrameworkProcessor::new(mode);
             let result = processor.process_thought(&params.thought, params.thought_number);
-
             FrameworkVisual::display_insights(&result.insights);
             FrameworkVisual::display_prompts(&result.prompts);
         }
@@ -73,7 +59,7 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
             params.total_thoughts,
             params.chain_id.clone(),
             params.next_thought_needed,
-            Some(framework.to_string()),
+            Some(state.to_string()),
             params.importance,
             params.relevance,
             params.tags.clone(),

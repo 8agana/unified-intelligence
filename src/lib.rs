@@ -1,5 +1,6 @@
 pub mod config;
 pub mod error;
+pub mod frameworks;
 pub mod intent;
 pub mod models;
 pub mod synth;

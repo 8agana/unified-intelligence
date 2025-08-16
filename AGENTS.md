@@ -1,5 +1,10 @@
 # Repository Guidelines
 
+## Definitions
+- **Framework (WorkflowState):** Top-level operating mode selected by the user/system: `conversation` (default), `debug`, `build`, `stuck`, `review`. One active at a time; guides interaction style.
+- **ThinkingMode:** Sub-layer analysis technique within a framework: `first_principles`, `ooda`, `systems`, `root_cause`, `swot`. Multiple can be active; internal lenses/voices surfaced when useful.
+- **ThinkingSet:** A set of ThinkingModes active within the current framework. Backed by `EnumSet<ThinkingMode>`, serializes as a transparent JSON array with deterministic ordering.
+
 ## Project Structure & Module Organization
 - Source in `src/`: `main.rs` (binary) and `lib.rs` (library).
 - MCP handlers in `src/handlers/`: `ui_think`, `ui_recall`, `ui_help`, `ui_knowledge`.
@@ -49,6 +54,12 @@
 
 ## Next Steps
 - Create and use a worktree/branch `framework-refactor` to correct framework enums, naming, and handler integration, then restore `cargo check`/tests and clippy to green.
+
+## Deferred Work (Future Iteration)
+- Stuck cycling: Wire `StuckTracker` into `ui_think` to persist and rotate ThinkingModes across calls when framework_state=stuck (store per chain in Redis).
+- User-steered modes: Optionally accept `thinking_mode` or `thinking_set` overrides (soft hints) with forgiving parsing; keep default behavior fully automatic.
+- Telemetry: Count non-canonical `framework_state` inputs that required synonym/fuzzy mapping for later tuning, without interrupting users.
+- Priority/ranking: Re-introduce priority helpers if we need to rank modes or states in retrieval or display. Removed for now to keep code surface minimal.
 
 ## Testing Guidelines
 - Use `#[test]` unit tests colocated with code; group under `mod tests`.

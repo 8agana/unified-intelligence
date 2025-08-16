@@ -1,3 +1,4 @@
+use crate::frameworks::WorkflowState;
 use chrono::Utc;
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -115,9 +116,10 @@ pub struct UiThinkParams {
     pub chain_id: Option<String>,
 
     #[schemars(
-        description = "Optional thinking framework: 'ooda', 'socratic', 'first_principles', 'systems', 'root_cause', 'swot', 'sequential', 'remember', 'deepremember'"
+        description = "Framework state: conversation (default), debug, build, stuck, review"
     )]
-    pub framework: Option<String>,
+    #[serde(default, alias = "framework", alias = "state")]
+    pub framework_state: WorkflowState,
 
     // NEW METADATA FIELDS FOR FEEDBACK LOOP SYSTEM
     #[schemars(description = "Importance score from 1-10 scale")]

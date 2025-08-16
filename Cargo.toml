@@ -8,6 +8,7 @@ license = "MIT"
 repository = "https://github.com/8agana/unified-intelligence"
 
 [dependencies]
+enumset = { version = "1.1", features = ["serde"] }
 rmcp = { version = "0.5.0", features = ["transport-io", "transport-streamable-http-server", "transport-worker", "macros"] }
 rmcp-macros = "0.5.0"
 schemars = { version = "1.0", features = ["derive"] }

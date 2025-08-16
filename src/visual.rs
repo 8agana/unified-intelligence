@@ -1,3 +1,4 @@
+use crate::frameworks::WorkflowState;
 use colored::*;
 
 /// Visual output module for unified-intelligence MCP
@@ -50,6 +51,29 @@ impl VisualOutput {
                     eprintln!("   {}", current_line.white());
                 }
             }
+        }
+    }
+
+    /// Display current framework state (workflow) banner
+    pub fn framework_state(&self, state: WorkflowState) {
+        let (icon, label, note) = match state {
+            WorkflowState::Conversation => {
+                ("🗒", "conversation", Some("read-only; focus on capturing"))
+            }
+            WorkflowState::Debug => ("🛠", "debug", None),
+            WorkflowState::Build => ("🏗", "build", None),
+            WorkflowState::Stuck => ("🧩", "stuck", None),
+            WorkflowState::Review => ("🧐", "review", None),
+        };
+        if let Some(n) = note {
+            eprintln!(
+                "   {} {} ({})",
+                icon.bright_white(),
+                label.bright_white(),
+                n.dimmed()
+            );
+        } else {
+            eprintln!("   {} {}", icon.bright_white(), label.bright_white());
         }
     }
 
