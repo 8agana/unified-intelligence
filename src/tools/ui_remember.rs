@@ -53,6 +53,13 @@ pub struct UiRememberParams {
     #[serde(default)]
     #[allow(dead_code)]
     pub temporal: Option<String>,
+
+    /// Optional LLM feedback on the synthesis/retrieval (when action="feedback")
+    #[serde(default)]
+    pub feedback: Option<String>,
+    /// Optional decision to continue after feedback
+    #[serde(default)]
+    pub continue_next: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]

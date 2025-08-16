@@ -434,6 +434,77 @@ impl UnifiedIntelligenceService {
             return Ok(CallToolResult::success(vec![content]));
         }
 
+        // If this is an explicit feedback call, store Thought 3 (feedback) and return
+        if matches!(p.action.as_deref(), Some("feedback")) || p.feedback.is_some() {
+            let chain_id = p.chain_id.clone().ok_or_else(|| {
+                ErrorData::invalid_params("chain_id is required for feedback".to_string(), None)
+            })?;
+            // Find latest assistant thought in the chain to attach feedback to
+            let latest_assistant = self
+                .handlers
+                .repository
+                .get_chain_thoughts(&self.instance_id, &chain_id)
+                .await
+                .ok()
+                .and_then(|thoughts| {
+                    thoughts
+                        .into_iter()
+                        .filter(|t| t.category.as_deref() == Some("ui_remember:assistant"))
+                        .max_by_key(|t| t.timestamp.clone())
+                });
+
+            // Build feedback content
+            let feedback_text = p.feedback.unwrap_or_default();
+            let t3 = crate::models::ThoughtRecord::new(
+                self.instance_id.clone(),
+                feedback_text,
+                p.thought_number.max(2) + 1, // place after T2
+                p.total_thoughts.max(3),
+                Some(chain_id.clone()),
+                p.continue_next.unwrap_or(false),
+                Some("ui_remember".to_string()),
+                None,
+                None,
+                p.tags.clone(),
+                Some("ui_remember:feedback".to_string()),
+            );
+            let thought3_id = t3.id.clone();
+            if let Err(e) = self.handlers.repository.save_thought(&t3).await {
+                tracing::error!("ui_remember: failed to save feedback T3: {}", e);
+                return Err(ErrorData::internal_error(e.to_string(), None));
+            }
+
+            // Update feedback hash for latest assistant if available
+            if let (Some(assistant), Ok(mut con)) = (
+                latest_assistant,
+                self.handlers.redis_manager.get_connection().await,
+            ) {
+                let key = format!("voice:feedback:{}", assistant.id);
+                let _: () = redis::pipe()
+                    .hset(&key, "llm_feedback", &t3.thought)
+                    .hset(
+                        &key,
+                        "continue_next",
+                        i32::from(p.continue_next.unwrap_or(false)),
+                    )
+                    .query_async(&mut *con)
+                    .await
+                    .unwrap_or(());
+            }
+
+            let result = UiRememberResult {
+                status: "feedback_saved".to_string(),
+                thought3_id: Some(thought3_id),
+                ..Default::default()
+            };
+            let ack = Content::text(
+                "Feedback stored. Set continue_next=true to proceed with another query.",
+            );
+            let content = Content::json(result)
+                .map_err(|e| ErrorData::internal_error(format!("JSON encode error: {e}"), None))?;
+            return Ok(CallToolResult::success(vec![ack, content]));
+        }
+
         // 1) If there is a prior assistant synthesis in this chain, update its feedback from current user behavior
         if let Some(ref chain_id) = p.chain_id {
             if let Ok(chain_thoughts) = self
@@ -591,7 +662,7 @@ impl UnifiedIntelligenceService {
         let knn_count = knn_items.len();
         // Simple recency proxy: average age (seconds) of KNN items
         let now_ts = chrono::Utc::now().timestamp();
-        let avg_age_secs: i64 = if knn_count > 0 {
+        let _avg_age_secs: i64 = if knn_count > 0 {
             let sum: i64 = knn_items
                 .iter()
                 .map(|(_, _, _, ts)| (now_ts - *ts).max(0))
@@ -738,35 +809,7 @@ impl UnifiedIntelligenceService {
             return Err(ErrorData::internal_error(e.to_string(), None));
         }
 
-        // 5) Store Thought 3 (system metrics note) and seed feedback hash for T2
-        let metrics_text = format!(
-            "[ui_remember:metrics]\\nretrieved_text={}\\nretrieved_embedding={}\\navg_age_secs={}\\nlatency_ms={}\\nmodel={}\\ntop_k_used={}",
-            retrieved.len(),
-            knn_count,
-            avg_age_secs,
-            _latency_ms,
-            synthesized.model_used.clone(),
-            top_k_used
-        );
-        let t3 = crate::models::ThoughtRecord::new(
-            self.instance_id.clone(),
-            metrics_text,
-            p.thought_number + 2,
-            p.total_thoughts.max(3),
-            p.chain_id.clone(),
-            false, // metrics/feedback concludes this step; caller can decide to continue
-            Some("ui_remember".to_string()),
-            None,
-            None,
-            p.tags.clone(),
-            Some("ui_remember:metrics".to_string()),
-        );
-        let thought3_id = t3.id.clone();
-        if let Err(e) = self.handlers.repository.save_thought(&t3).await {
-            tracing::warn!("ui_remember: failed to save T3 metrics note: {}", e);
-        }
-
-        // feedback hash: voice:feedback:{t2.id}
+        // 5) Prompt for LLM feedback (no metrics thought here). Seed feedback hash for T2.
         if let Ok(mut con) = self.handlers.redis_manager.get_connection().await {
             let key = format!("voice:feedback:{thought2_id}");
             let mut pipe = redis::pipe();
@@ -783,7 +826,7 @@ impl UnifiedIntelligenceService {
             status: "ok".to_string(),
             thought1_id,
             thought2_id,
-            thought3_id: Some(thought3_id),
+            thought3_id: None,
             model_used: Some(synthesized.model_used.clone()),
             usage_total_tokens: synthesized.usage.as_ref().and_then(|u| u.total_tokens),
             assistant_text: Some(synthesized.text.clone()),
@@ -791,11 +834,14 @@ impl UnifiedIntelligenceService {
             retrieved_embedding_count: Some(knn_count),
         };
 
-        // Return both: human-displayable text and machine-readable JSON
-        let text_part = Content::text(synthesized.text);
+        // Return assistant response and a feedback prompt
+        let text_part = Content::text(synthesized.text.clone());
+        let prompt = Content::text(
+            "Provide feedback via ui_remember with action=\"feedback\" and feedback: <your critique>. Optionally include continue_next=true to proceed.",
+        );
         let json_part = Content::json(result)
             .map_err(|e| ErrorData::internal_error(format!("JSON encode error: {e}"), None))?;
-        Ok(CallToolResult::success(vec![text_part, json_part]))
+        Ok(CallToolResult::success(vec![text_part, prompt, json_part]))
     }
 }
 
