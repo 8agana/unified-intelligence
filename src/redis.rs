@@ -368,7 +368,9 @@ impl RedisManager {
         let result: Vec<String> = match first_attempt {
             Ok(v) => v,
             Err(UnifiedIntelligenceError::Internal(msg)) if msg == "NOSCRIPT" => {
-                tracing::warn!("Lua script missing (get_chain_thoughts), reloading and retrying once");
+                tracing::warn!(
+                    "Lua script missing (get_chain_thoughts), reloading and retrying once"
+                );
                 self.load_scripts().await?;
                 redis::cmd("EVALSHA")
                     .arg(&script_sha)

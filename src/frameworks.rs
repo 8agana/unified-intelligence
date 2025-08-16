@@ -12,6 +12,7 @@ use thiserror::Error;
 // ───────────────────────────────────────────────────────────────────────────────
 
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum FrameworkError {
     #[error("Invalid framework name '{name}'. Valid frameworks: {valid_list}")]
     InvalidFramework { name: String, valid_list: String },
@@ -28,6 +29,7 @@ pub enum FrameworkError {
     EmptyFrameworkName,
 }
 
+#[allow(dead_code)]
 impl FrameworkError {
     pub fn invalid_framework(name: &str) -> Self {
         let valid_frameworks = "ooda, socratic, first_principles, systems, root_cause, swot";
@@ -42,21 +44,16 @@ impl FrameworkError {
 // Workflow states (operational)
 // ───────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum WorkflowState {
+    #[default]
     Conversation, // read-only capture
-    Debug,        // problem-solving
-    Build,        // construction
-    Stuck,        // blocked, cycling approaches
-    Review,       // assessment
-}
-
-impl Default for WorkflowState {
-    fn default() -> Self {
-        WorkflowState::Conversation
-    }
+    Debug,  // problem-solving
+    Build,  // construction
+    Stuck,  // blocked, cycling approaches
+    Review, // assessment
 }
 
 // Forgiving deserializer: accepts case/spacing/punctuation variants and synonyms
@@ -104,7 +101,9 @@ fn parse_state_loose(input: &str) -> WorkflowState {
     let n = normalize(input);
     match &*n {
         // Canonical and synonyms
-        "conversation" | "conv" | "chat" | "talk" | "notes" | "log" => return WorkflowState::Conversation,
+        "conversation" | "conv" | "chat" | "talk" | "notes" | "log" => {
+            return WorkflowState::Conversation;
+        }
         "debug" | "dbg" | "fix" | "diagnose" | "triage" => return WorkflowState::Debug,
         "build" | "make" | "compile" | "ship" => return WorkflowState::Build,
         "stuck" | "blocked" | "jammed" | "deadlock" => return WorkflowState::Stuck,
@@ -217,7 +216,7 @@ impl FromStr for ThinkingMode {
             "ooda" => Ok(ThinkingMode::Ooda),
             "rootcause" => Ok(ThinkingMode::RootCause),
             "swot" => Ok(ThinkingMode::Swot),
-            _ => Err(format!("unknown thinking mode: {}", s)),
+            _ => Err(format!("unknown thinking mode: {s}")),
         }
     }
 }
@@ -233,6 +232,7 @@ impl ThinkingMode {
     ];
 
     // Backward-compat API used by handlers
+    #[allow(dead_code)]
     pub fn from_string(framework: &str) -> Result<Self, FrameworkError> {
         if framework.trim().is_empty() {
             return Err(FrameworkError::EmptyFrameworkName);
@@ -240,6 +240,7 @@ impl ThinkingMode {
         Self::from_str(framework).map_err(|_| FrameworkError::invalid_framework(framework))
     }
 
+    #[allow(dead_code)]
     pub fn from_string_safe(framework: &str) -> Self {
         Self::from_string(framework).unwrap_or(ThinkingMode::FirstPrinciples)
     }
@@ -279,6 +280,7 @@ impl ThinkingMode {
         }
     }
 
+    #[allow(dead_code)]
     pub const fn persistence_priority(&self) -> Priority {
         match self {
             ThinkingMode::FirstPrinciples => Priority(6),
@@ -291,6 +293,7 @@ impl ThinkingMode {
 }
 
 impl WorkflowState {
+    #[allow(dead_code)]
     pub const fn is_readonly(&self) -> bool {
         matches!(self, WorkflowState::Conversation)
     }
@@ -306,10 +309,12 @@ impl WorkflowState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn modes(&self) -> impl Iterator<Item = ThinkingMode> + '_ {
         self.thinking_modes().iter().copied()
     }
 
+    #[allow(dead_code)]
     pub const fn suggested_next(&self) -> Option<WorkflowState> {
         use WorkflowState::*;
         match self {
@@ -319,6 +324,7 @@ impl WorkflowState {
         }
     }
 
+    #[allow(dead_code)]
     pub const fn persistence_priority(&self) -> Priority {
         match self {
             WorkflowState::Build => Priority(10),
@@ -331,8 +337,13 @@ impl WorkflowState {
 }
 
 // Combined priority helper
+#[allow(dead_code)]
 pub fn combined_priority(state: WorkflowState, mode: Option<ThinkingMode>) -> (Priority, Priority) {
-    (state.persistence_priority(), mode.map(|m| m.persistence_priority()).unwrap_or(Priority(0)))
+    (
+        state.persistence_priority(),
+        mode.map(|m| m.persistence_priority())
+            .unwrap_or(Priority(0)),
+    )
 }
 
 // Transparent set wrapper with snake_case JSON
@@ -373,8 +384,11 @@ mod thinking_set_serde {
     }
 }
 
+#[allow(dead_code)]
 pub fn ordered_modes(set: &EnumSet<ThinkingMode>) -> impl Iterator<Item = ThinkingMode> + '_ {
-    ThinkingMode::ALL.into_iter().filter(move |m| set.contains(*m))
+    ThinkingMode::ALL
+        .into_iter()
+        .filter(move |m| set.contains(*m))
 }
 
 /// Framework processing engine
@@ -601,6 +615,7 @@ pub struct StuckTracker {
     pub current_cycle: usize,
 }
 
+#[allow(dead_code)]
 impl StuckTracker {
     // Intentionally excludes SWOT from the cycle.
     pub const CYCLE_ORDER: [ThinkingMode; 5] = [
@@ -662,10 +677,22 @@ mod tests {
 
     #[test]
     fn suggested_next_transitions() {
-        assert_eq!(WorkflowState::Stuck.suggested_next(), Some(WorkflowState::Build));
-        assert_eq!(WorkflowState::Debug.suggested_next(), Some(WorkflowState::Build));
-        assert_eq!(WorkflowState::Review.suggested_next(), Some(WorkflowState::Build));
-        assert_eq!(WorkflowState::Build.suggested_next(), Some(WorkflowState::Review));
+        assert_eq!(
+            WorkflowState::Stuck.suggested_next(),
+            Some(WorkflowState::Build)
+        );
+        assert_eq!(
+            WorkflowState::Debug.suggested_next(),
+            Some(WorkflowState::Build)
+        );
+        assert_eq!(
+            WorkflowState::Review.suggested_next(),
+            Some(WorkflowState::Build)
+        );
+        assert_eq!(
+            WorkflowState::Build.suggested_next(),
+            Some(WorkflowState::Review)
+        );
         assert_eq!(WorkflowState::Conversation.suggested_next(), None);
     }
 

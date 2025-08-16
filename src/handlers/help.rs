@@ -55,14 +55,14 @@ impl HelpHandler {
 
     fn general_help(&self) -> HelpResponse {
         HelpResponse {
-            overview: "UnifiedIntelligence MCP Server - A Redis-backed thought storage and retrieval system with thinking framework support.\n\nAvailable tools:\n• ui_think - Capture and process thoughts with optional chaining and framework support\n• ui_recall - Retrieve thoughts by ID or chain ID\n• ui_help - Get help information about the tools".to_string(),
+            overview: "UnifiedIntelligence MCP Server - A Redis-backed thought storage and retrieval system with workflow frameworks and internal thinking modes.\n\nAvailable tools:\n• ui_think - Capture and process thoughts with optional chaining and framework_state\n• ui_recall - Retrieve thoughts by ID or chain ID\n• ui_help - Get help information about the tools".to_string(),
             tools: json!({
                 "ui_think": {
                     "description": "Capture and process thoughts with optional chaining support",
                     "purpose": "Store structured thoughts with metadata for later retrieval and analysis",
                     "key_features": [
                         "Sequential thought chaining",
-                        "Multiple thinking frameworks",
+                        "Framework states + internal thinking modes",
                         "Importance and relevance scoring",
                         "Categorization and tagging",
                         "Automatic embeddings generation"
@@ -101,21 +101,21 @@ impl HelpHandler {
                         "chain_id": "20240129-architecture-review"
                     }
                 },
-                "framework_thinking": {
-                    "description": "Use a thinking framework",
+                "framework_state": {
+                    "description": "Use a workflow framework state",
                     "params": {
                         "thought": "Why is the API response time increasing?",
                         "thought_number": 1,
                         "total_thoughts": 5,
                         "next_thought_needed": true,
-                        "framework": "root_cause",
+                        "framework_state": "debug",
                         "chain_id": "20240129-performance-analysis"
                     }
                 }
             }),
             tips: vec![
                 "Use chain_id to link related thoughts together for better context".to_string(),
-                "Apply thinking frameworks to structure your analysis (ooda, socratic, first_principles, systems, root_cause, swot)".to_string(),
+                "Set framework_state to guide interaction (conversation, debug, build, stuck, review); internal modes (first_principles, ooda, systems, root_cause, swot, socratic) are selected automatically".to_string(),
                 "Add importance (1-10) and relevance (1-10) scores for prioritization".to_string(),
                 "Use tags and categories to organize thoughts for easier retrieval".to_string(),
                 "The thought_number and total_thoughts help track progress in multi-step thinking".to_string(),
@@ -134,47 +134,22 @@ impl HelpHandler {
             },
             "optional_params": {
                 "chain_id": "Optional chain ID to link thoughts together (string)",
-                "framework": "Optional thinking framework (string): 'ooda', 'socratic', 'first_principles', 'systems', 'root_cause', 'swot'",
+                "framework_state": "Workflow framework state (string): 'conversation' (default), 'debug', 'build', 'stuck', 'review'",
                 "importance": "Importance score from 1-10 scale (integer)",
                 "relevance": "Relevance score from 1-10 scale to current task (integer)",
                 "tags": "Tags for categorization (array of strings)",
                 "category": "Category: 'technical', 'strategic', 'operational', or 'relationship' (string)"
             }
         });
-
         let frameworks = json!({
-            "available_frameworks": {
-                "ooda": {
-                    "name": "OODA Loop",
-                    "description": "Observe, Orient, Decide, Act - for rapid decision-making",
-                    "use_when": "Need to make quick decisions or respond to changing situations"
-                },
-                "socratic": {
-                    "name": "Socratic Method",
-                    "description": "Question-based exploration to uncover assumptions",
-                    "use_when": "Want to deeply understand a concept or challenge assumptions"
-                },
-                "first_principles": {
-                    "name": "First Principles",
-                    "description": "Break down to fundamental truths and build up",
-                    "use_when": "Need to solve complex problems or innovate"
-                },
-                "systems": {
-                    "name": "Systems Thinking",
-                    "description": "Analyze interconnections and feedback loops",
-                    "use_when": "Dealing with complex systems or organizational issues"
-                },
-                "root_cause": {
-                    "name": "Root Cause Analysis",
-                    "description": "5 Whys and fishbone analysis for problem solving",
-                    "use_when": "Investigating problems or failures"
-                },
-                "swot": {
-                    "name": "SWOT Analysis",
-                    "description": "Strengths, Weaknesses, Opportunities, Threats",
-                    "use_when": "Strategic planning or evaluating options"
-                }
-            }
+            "frameworks": {
+                "conversation": { "default": true, "notes": "read-only; focus on capturing", "modes": ["first_principles","systems","swot"] },
+                "debug":        { "modes": ["root_cause","ooda","socratic"] },
+                "build":        { "modes": [] },
+                "stuck":        { "modes": ["first_principles","socratic","systems","ooda","root_cause"] },
+                "review":       { "modes": ["socratic","systems","first_principles"] }
+            },
+            "thinking_modes": ["first_principles","socratic","systems","ooda","root_cause","swot"]
         });
 
         let examples = json!({
@@ -192,7 +167,7 @@ impl HelpHandler {
                     "thought_number": 1,
                     "total_thoughts": 5,
                     "next_thought_needed": true,
-                    "framework": "root_cause",
+                    "framework_state": "debug",
                     "chain_id": "20240129-db-performance",
                     "importance": 8,
                     "relevance": 10,
@@ -207,7 +182,7 @@ impl HelpHandler {
                     "total_thoughts": 5,
                     "next_thought_needed": true,
                     "chain_id": "20240129-db-performance",
-                    "framework": "root_cause"
+                    "framework_state": "debug"
                 }
             }
         });

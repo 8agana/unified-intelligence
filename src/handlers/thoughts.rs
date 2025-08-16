@@ -15,8 +15,10 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
         // Use parsed, forgiving framework_state (defaults to Conversation)
         let state: WorkflowState = params.framework_state;
 
+        // Show framework banner and choose a thinking mode based on state (first recommended), if any
+        self.visual.framework_state(state);
         // Choose a thinking mode based on state (first recommended), if any
-        let chosen_mode: Option<ThinkingMode> = state.thinking_modes().get(0).copied();
+        let chosen_mode: Option<ThinkingMode> = state.thinking_modes().first().copied();
 
         // Display visual start with framework
         self.visual
