@@ -1,5 +1,6 @@
 use chrono::Utc;
 use serde::{Deserialize, Deserializer, Serialize};
+use crate::frameworks::WorkflowState;
 
 fn default_importance() -> Option<i32> {
     Some(5)
@@ -114,10 +115,9 @@ pub struct UiThinkParams {
     #[schemars(description = "Optional chain ID to link thoughts together")]
     pub chain_id: Option<String>,
 
-    #[schemars(
-        description = "Optional thinking framework: 'ooda', 'socratic', 'first_principles', 'systems', 'root_cause', 'swot', 'sequential', 'remember', 'deepremember'"
-    )]
-    pub framework: Option<String>,
+    #[schemars(description = "Framework state: conversation (default), debug, build, stuck, review")]
+    #[serde(default, alias = "framework", alias = "state")]
+    pub framework_state: WorkflowState,
 
     // NEW METADATA FIELDS FOR FEEDBACK LOOP SYSTEM
     #[schemars(description = "Importance score from 1-10 scale")]

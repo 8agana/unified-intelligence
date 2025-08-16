@@ -1,6 +1,7 @@
 /// Thinking frameworks, workflow state, and helpers for unified-intelligence
 use colored::*;
 use enumset::{EnumSet, EnumSetType};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -41,7 +42,7 @@ impl FrameworkError {
 // Workflow states (operational)
 // ───────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum WorkflowState {
@@ -56,6 +57,121 @@ impl Default for WorkflowState {
     fn default() -> Self {
         WorkflowState::Conversation
     }
+}
+
+// Forgiving deserializer: accepts case/spacing/punctuation variants and synonyms
+impl<'de> serde::Deserialize<'de> for WorkflowState {
+    fn deserialize<D>(de: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = match String::deserialize(de) {
+            Ok(s) => s,
+            Err(_) => return Ok(WorkflowState::Conversation),
+        };
+        Ok(parse_state_loose(&s))
+    }
+}
+
+impl fmt::Display for WorkflowState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            WorkflowState::Conversation => "conversation",
+            WorkflowState::Debug => "debug",
+            WorkflowState::Build => "build",
+            WorkflowState::Stuck => "stuck",
+            WorkflowState::Review => "review",
+        };
+        f.write_str(s)
+    }
+}
+
+impl FromStr for WorkflowState {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match parse_state_loose(s) {
+            WorkflowState::Conversation => Ok(WorkflowState::Conversation),
+            WorkflowState::Debug => Ok(WorkflowState::Debug),
+            WorkflowState::Build => Ok(WorkflowState::Build),
+            WorkflowState::Stuck => Ok(WorkflowState::Stuck),
+            WorkflowState::Review => Ok(WorkflowState::Review),
+        }
+    }
+}
+
+// Loose parsing helpers
+fn parse_state_loose(input: &str) -> WorkflowState {
+    let n = normalize(input);
+    match &*n {
+        // Canonical and synonyms
+        "conversation" | "conv" | "chat" | "talk" | "notes" | "log" => return WorkflowState::Conversation,
+        "debug" | "dbg" | "fix" | "diagnose" | "triage" => return WorkflowState::Debug,
+        "build" | "make" | "compile" | "ship" => return WorkflowState::Build,
+        "stuck" | "blocked" | "jammed" | "deadlock" => return WorkflowState::Stuck,
+        "review" | "rev" | "pr" | "codereview" | "critique" => return WorkflowState::Review,
+        _ => {}
+    }
+
+    // Prefix hints
+    for (prefix, state) in &[
+        ("deb", WorkflowState::Debug),
+        ("bui", WorkflowState::Build),
+        ("stu", WorkflowState::Stuck),
+        ("rev", WorkflowState::Review),
+        ("con", WorkflowState::Conversation),
+    ] {
+        if n.starts_with(prefix) {
+            return *state;
+        }
+    }
+
+    // Fuzzy to canonical
+    let canon = [
+        ("conversation", WorkflowState::Conversation),
+        ("debug", WorkflowState::Debug),
+        ("build", WorkflowState::Build),
+        ("stuck", WorkflowState::Stuck),
+        ("review", WorkflowState::Review),
+    ];
+    if let Some((d, st)) = canon
+        .iter()
+        .map(|(name, st)| (levenshtein(&n, name), *st))
+        .min_by_key(|(d, _)| *d)
+    {
+        if d <= 2 {
+            return st;
+        }
+    }
+
+    WorkflowState::Conversation
+}
+
+fn normalize(s: &str) -> std::borrow::Cow<'_, str> {
+    let s = s
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['-', ' '], "_")
+        .replace("__", "_");
+    let filtered: String = s
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    std::borrow::Cow::Owned(filtered.replace('_', ""))
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0; b.len() + 1];
+    for (i, &ac) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, &bc) in b.iter().enumerate() {
+            let cost = if ac == bc { 0 } else { 1 };
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+        }
+        prev.clone_from_slice(&curr);
+    }
+    prev[b.len()]
 }
 
 // Priority newtype for persistence ordering
@@ -125,7 +241,7 @@ impl ThinkingMode {
     }
 
     pub fn from_string_safe(framework: &str) -> Self {
-        Self::from_string(framework).unwrap_or(ThinkingMode::Socratic)
+        Self::from_string(framework).unwrap_or(ThinkingMode::FirstPrinciples)
     }
 
     pub const fn name(&self) -> &'static str {
@@ -572,12 +688,12 @@ mod tests {
     #[test]
     fn thinking_set_serde_snake_case_roundtrip() {
         let mut set = EnumSet::empty();
-        set.insert(ThinkingMode::Socratic);
+        set.insert(ThinkingMode::RootCause);
         set.insert(ThinkingMode::Ooda);
 
         let wrapped = ThinkingSet(set);
         let json = serde_json::to_string(&wrapped).unwrap();
-        assert!(json.contains("\"socratic\""));
+        assert!(json.contains("\"root_cause\""));
         assert!(json.contains("\"ooda\""));
 
         let restored: ThinkingSet = serde_json::from_str(&json).unwrap();
