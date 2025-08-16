@@ -1,5 +1,10 @@
 # Repository Guidelines
 
+## Definitions
+- **Framework (WorkflowState):** Top-level operating mode selected by the user/system: `conversation` (default), `debug`, `build`, `stuck`, `review`. One active at a time; guides interaction style.
+- **ThinkingMode:** Sub-layer analysis technique within a framework: `first_principles`, `ooda`, `systems`, `root_cause`, `swot`. Multiple can be active; internal lenses/voices surfaced when useful.
+- **ThinkingSet:** A set of ThinkingModes active within the current framework. Backed by `EnumSet<ThinkingMode>`, serializes as a transparent JSON array with deterministic ordering.
+
 ## Project Structure & Module Organization
 - Source in `src/`: `main.rs` (binary) and `lib.rs` (library).
 - MCP handlers in `src/handlers/`: `ui_think`, `ui_recall`, `ui_help`, `ui_knowledge`.

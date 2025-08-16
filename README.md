@@ -26,6 +26,11 @@
 ## Introduction
 Unified Intelligence is a Rust-based Model Context Protocol (MCP) server. It stores and recalls structured “thoughts”, supports multiple thinking frameworks, and exposes additional memory/context tools over stdio or HTTP. Storage is Redis-only, with OpenAI embeddings and Groq for intent parsing and synthesis.
 
+## Definitions
+- **Framework (WorkflowState):** A top-level operating mode chosen by the user or system. Examples: `conversation` (default), `debug`, `build`, `stuck`, `review`. Exactly one framework is active at a time; it defines how the system structures interaction.
+- **ThinkingMode:** A sub-layer analysis technique available inside a framework. Examples: `first_principles`, `ooda`, `systems`, `root_cause`, `swot`. Multiple modes can be active simultaneously; they are internal “voices/lenses” that can be surfaced in output when helpful.
+- **ThinkingSet:** A collection of ThinkingModes active within a given framework. Implemented as `EnumSet<ThinkingMode>`, serialized as a transparent JSON array with deterministic ordering for predictable iteration.
+
 ## Features
 - **Thinking Frameworks:** Implements multiple cognitive frameworks (OODA, Socratic, First Principles, Systems, Root Cause, SWOT) to guide thought processing for `ui_think`.
 - **Groq Integration:** Leverages Groq's powerful language models for natural language understanding, search query parsing, and intelligent response synthesis from retrieved memories.
