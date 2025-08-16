@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::frameworks::{FrameworkProcessor, FrameworkVisual, ThinkingFramework};
+use crate::frameworks::{FrameworkProcessor, FrameworkVisual, ThinkingMode};
 use crate::models::{ChainMetadata, ThinkResponse, ThoughtRecord, UiThinkParams};
 use crate::repository_traits::{KnowledgeRepository, ThoughtRepository};
 
@@ -15,10 +15,10 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
         // Determine framework with graceful fallback to Socratic on invalid
         let framework = if let Some(ref framework_str) = params.framework {
             // Use safe parsing that defaults to Socratic on invalid input
-            let parsed = ThinkingFramework::from_string_safe(framework_str);
+            let parsed = ThinkingMode::from_string_safe(framework_str);
 
             // Log a warning if the framework was invalid but continue with default
-            if ThinkingFramework::from_string(framework_str).is_err() {
+            if ThinkingMode::from_string(framework_str).is_err() {
                 tracing::warn!(
                     "Invalid framework '{}' provided, defaulting to Socratic",
                     framework_str
@@ -32,7 +32,7 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
 
             parsed
         } else {
-            ThinkingFramework::Socratic
+            ThinkingMode::Socratic
         };
 
         // Display visual start with framework
@@ -42,8 +42,8 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
         self.visual.thought_content(&params.thought);
 
         // Process through framework
-        if framework != ThinkingFramework::Socratic {
-            let processor = FrameworkProcessor::new(framework.clone());
+        if framework != ThinkingMode::Socratic {
+            let processor = FrameworkProcessor::new(framework);
             let result = processor.process_thought(&params.thought, params.thought_number);
 
             FrameworkVisual::display_insights(&result.insights);

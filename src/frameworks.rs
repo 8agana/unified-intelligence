@@ -1,11 +1,15 @@
-/// Thinking frameworks module for unified-intelligence
-/// Provides cognitive enhancement layers
+/// Thinking frameworks, workflow state, and helpers for unified-intelligence
 use colored::*;
+use enumset::{EnumSet, EnumSetType};
+use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::str::FromStr;
 use thiserror::Error;
-// Removed unused imports: Duration, timeout
 
-/// Framework validation and processing errors
+// ───────────────────────────────────────────────────────────────────────────────
+// Errors
+// ───────────────────────────────────────────────────────────────────────────────
+
 #[derive(Error, Debug)]
 pub enum FrameworkError {
     #[error("Invalid framework name '{name}'. Valid frameworks: {valid_list}")]
@@ -24,7 +28,6 @@ pub enum FrameworkError {
 }
 
 impl FrameworkError {
-    /// Create an invalid framework error with the list of valid frameworks
     pub fn invalid_framework(name: &str) -> Self {
         let valid_frameworks = "ooda, socratic, first_principles, systems, root_cause, swot";
         Self::InvalidFramework {
@@ -34,112 +37,249 @@ impl FrameworkError {
     }
 }
 
-/// Available thinking frameworks
-#[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Clone, PartialEq)]
-pub enum ThinkingFramework {
-    OODA,            // Observe, Orient, Decide, Act
-    Socratic,        // Default - Question-based analysis
-    FirstPrinciples, // Break down to fundamental truths
-    Systems,         // Understand interconnections and patterns
-    RootCause,       // Five Whys methodology
-    SWOT,            // Strengths, Weaknesses, Opportunities, Threats
+// ───────────────────────────────────────────────────────────────────────────────
+// Workflow states (operational)
+// ───────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum WorkflowState {
+    Conversation, // read-only capture
+    Debug,        // problem-solving
+    Build,        // construction
+    Stuck,        // blocked, cycling approaches
+    Review,       // assessment
 }
 
-impl fmt::Display for ThinkingFramework {
+impl Default for WorkflowState {
+    fn default() -> Self {
+        WorkflowState::Conversation
+    }
+}
+
+// Priority newtype for persistence ordering
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Priority(pub u8);
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Thinking modes (cognitive)
+// ───────────────────────────────────────────────────────────────────────────────
+
+#[derive(EnumSetType, Debug)]
+pub enum ThinkingMode {
+    FirstPrinciples,
+    Socratic,
+    Systems,
+    Ooda,
+    RootCause,
+    Swot,
+}
+
+impl fmt::Display for ThinkingMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ThinkingFramework::OODA => write!(f, "ooda"),
-            ThinkingFramework::Socratic => write!(f, "socratic"),
-            ThinkingFramework::FirstPrinciples => write!(f, "first_principles"),
-            ThinkingFramework::Systems => write!(f, "systems"),
-            ThinkingFramework::RootCause => write!(f, "root_cause"),
-            ThinkingFramework::SWOT => write!(f, "swot"),
+        let s = match self {
+            ThinkingMode::FirstPrinciples => "first_principles",
+            ThinkingMode::Socratic => "socratic",
+            ThinkingMode::Systems => "systems",
+            ThinkingMode::Ooda => "ooda",
+            ThinkingMode::RootCause => "root_cause",
+            ThinkingMode::Swot => "swot",
+        };
+        f.write_str(s)
+    }
+}
+
+impl FromStr for ThinkingMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let norm = s.to_ascii_lowercase().replace(['_', '-', ' '], "");
+        match norm.as_str() {
+            "firstprinciples" => Ok(ThinkingMode::FirstPrinciples),
+            "socratic" => Ok(ThinkingMode::Socratic),
+            "systems" => Ok(ThinkingMode::Systems),
+            "ooda" => Ok(ThinkingMode::Ooda),
+            "rootcause" => Ok(ThinkingMode::RootCause),
+            "swot" => Ok(ThinkingMode::Swot),
+            _ => Err(format!("unknown thinking mode: {}", s)),
         }
     }
 }
 
-impl ThinkingFramework {
-    /// Parse framework from string with validation
+impl ThinkingMode {
+    pub const ALL: [ThinkingMode; 6] = [
+        ThinkingMode::FirstPrinciples,
+        ThinkingMode::Socratic,
+        ThinkingMode::Systems,
+        ThinkingMode::Ooda,
+        ThinkingMode::RootCause,
+        ThinkingMode::Swot,
+    ];
+
+    // Backward-compat API used by handlers
     pub fn from_string(framework: &str) -> Result<Self, FrameworkError> {
         if framework.trim().is_empty() {
             return Err(FrameworkError::EmptyFrameworkName);
         }
-
-        match framework.to_lowercase().trim() {
-            "ooda" => Ok(Self::OODA),
-            "socratic" => Ok(Self::Socratic),
-            "first_principles" => Ok(Self::FirstPrinciples),
-            "systems" => Ok(Self::Systems),
-            "root_cause" => Ok(Self::RootCause),
-            "swot" => Ok(Self::SWOT),
-            _ => Err(FrameworkError::invalid_framework(framework)),
-        }
+        Self::from_str(framework).map_err(|_| FrameworkError::invalid_framework(framework))
     }
 
-    /// Safe parse that returns Socratic as fallback
     pub fn from_string_safe(framework: &str) -> Self {
-        Self::from_string(framework).unwrap_or(Self::Socratic)
+        Self::from_string(framework).unwrap_or(ThinkingMode::Socratic)
     }
 
-    /// Get framework name for display
-    pub fn name(&self) -> &'static str {
+    pub const fn name(&self) -> &'static str {
         match self {
-            Self::OODA => "OODA Loop",
-            Self::Socratic => "Socratic Method",
-            Self::FirstPrinciples => "First Principles",
-            Self::Systems => "Systems Thinking",
-            Self::RootCause => "Root Cause Analysis",
-            Self::SWOT => "SWOT Analysis",
+            ThinkingMode::Ooda => "OODA Loop",
+            ThinkingMode::Socratic => "Socratic Method",
+            ThinkingMode::FirstPrinciples => "First Principles",
+            ThinkingMode::Systems => "Systems Thinking",
+            ThinkingMode::RootCause => "Root Cause Analysis",
+            ThinkingMode::Swot => "SWOT Analysis",
         }
     }
 
-    /// Get framework description
     #[allow(dead_code)]
-    pub fn description(&self) -> &'static str {
+    pub const fn description(&self) -> &'static str {
         match self {
-            Self::OODA => "Observe, Orient, Decide, Act methodology",
-            Self::Socratic => "Question-based analysis and inquiry",
-            Self::FirstPrinciples => "Break down to fundamental truths",
-            Self::Systems => "Understand interconnections and patterns",
-            Self::RootCause => "Five Whys root cause analysis",
-            Self::SWOT => "Strengths, Weaknesses, Opportunities, Threats analysis",
+            ThinkingMode::Ooda => "Observe, Orient, Decide, Act methodology",
+            ThinkingMode::Socratic => "Question-based analysis and inquiry",
+            ThinkingMode::FirstPrinciples => "Break down to fundamental truths",
+            ThinkingMode::Systems => "Understand interconnections and patterns",
+            ThinkingMode::RootCause => "Five Whys root cause analysis",
+            ThinkingMode::Swot => "Strengths, Weaknesses, Opportunities, Threats analysis",
         }
     }
 
-    /// Get framework color for visual output
     #[allow(dead_code)]
-    pub fn color(&self) -> &'static str {
+    pub const fn color(&self) -> &'static str {
         match self {
-            Self::OODA => "bright_green",
-            Self::Socratic => "bright_white",
-            Self::FirstPrinciples => "bright_blue",
-            Self::Systems => "bright_cyan",
-            Self::RootCause => "bright_red",
-            Self::SWOT => "bright_orange",
+            ThinkingMode::Ooda => "bright_green",
+            ThinkingMode::Socratic => "bright_white",
+            ThinkingMode::FirstPrinciples => "bright_blue",
+            ThinkingMode::Systems => "bright_cyan",
+            ThinkingMode::RootCause => "bright_red",
+            ThinkingMode::Swot => "bright_orange",
         }
     }
+
+    pub const fn persistence_priority(&self) -> Priority {
+        match self {
+            ThinkingMode::FirstPrinciples => Priority(6),
+            ThinkingMode::RootCause => Priority(5),
+            ThinkingMode::Systems => Priority(4),
+            ThinkingMode::Ooda => Priority(3),
+            ThinkingMode::Socratic | ThinkingMode::Swot => Priority(2),
+        }
+    }
+}
+
+impl WorkflowState {
+    pub const fn is_readonly(&self) -> bool {
+        matches!(self, WorkflowState::Conversation)
+    }
+
+    pub const fn thinking_modes(&self) -> &'static [ThinkingMode] {
+        use ThinkingMode::*;
+        match self {
+            WorkflowState::Conversation => &[FirstPrinciples, Systems, Swot],
+            WorkflowState::Debug => &[RootCause, Ooda, Socratic],
+            WorkflowState::Build => &[],
+            WorkflowState::Stuck => &[FirstPrinciples, Socratic, Systems, Ooda, RootCause],
+            WorkflowState::Review => &[Socratic, Systems, FirstPrinciples],
+        }
+    }
+
+    pub fn modes(&self) -> impl Iterator<Item = ThinkingMode> + '_ {
+        self.thinking_modes().iter().copied()
+    }
+
+    pub const fn suggested_next(&self) -> Option<WorkflowState> {
+        use WorkflowState::*;
+        match self {
+            Stuck | Debug | Review => Some(Build),
+            Build => Some(Review),
+            Conversation => None,
+        }
+    }
+
+    pub const fn persistence_priority(&self) -> Priority {
+        match self {
+            WorkflowState::Build => Priority(10),
+            WorkflowState::Debug => Priority(9),
+            WorkflowState::Stuck => Priority(8),
+            WorkflowState::Review => Priority(7),
+            WorkflowState::Conversation => Priority(1),
+        }
+    }
+}
+
+// Combined priority helper
+pub fn combined_priority(state: WorkflowState, mode: Option<ThinkingMode>) -> (Priority, Priority) {
+    (state.persistence_priority(), mode.map(|m| m.persistence_priority()).unwrap_or(Priority(0)))
+}
+
+// Transparent set wrapper with snake_case JSON
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct ThinkingSet(#[serde(with = "thinking_set_serde")] pub EnumSet<ThinkingMode>);
+
+impl Default for ThinkingSet {
+    fn default() -> Self {
+        ThinkingSet(EnumSet::empty())
+    }
+}
+
+mod thinking_set_serde {
+    use super::*;
+    pub fn serialize<S>(set: &EnumSet<ThinkingMode>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let v: Vec<String> = ThinkingMode::ALL
+            .into_iter()
+            .filter(|m| set.contains(*m))
+            .map(|m| m.to_string())
+            .collect();
+        v.serialize(s)
+    }
+    pub fn deserialize<'de, D>(d: D) -> Result<EnumSet<ThinkingMode>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let v = Vec::<String>::deserialize(d)?;
+        let mut out = EnumSet::empty();
+        for s in v {
+            let m = ThinkingMode::from_str(&s).map_err(serde::de::Error::custom)?;
+            out.insert(m);
+        }
+        Ok(out)
+    }
+}
+
+pub fn ordered_modes(set: &EnumSet<ThinkingMode>) -> impl Iterator<Item = ThinkingMode> + '_ {
+    ThinkingMode::ALL.into_iter().filter(move |m| set.contains(*m))
 }
 
 /// Framework processing engine
 pub struct FrameworkProcessor {
-    framework: ThinkingFramework,
+    framework: ThinkingMode,
 }
 
 impl FrameworkProcessor {
-    pub fn new(framework: ThinkingFramework) -> Self {
+    pub fn new(framework: ThinkingMode) -> Self {
         Self { framework }
     }
 
     /// Process thought through the selected framework
     pub fn process_thought(&self, thought: &str, thought_number: i32) -> FrameworkResult {
-        match &self.framework {
-            ThinkingFramework::OODA => self.process_ooda(thought, thought_number),
-            ThinkingFramework::Socratic => self.process_socratic(thought),
-            ThinkingFramework::FirstPrinciples => self.process_first_principles(thought),
-            ThinkingFramework::Systems => self.process_systems(thought),
-            ThinkingFramework::RootCause => self.process_root_cause(thought, thought_number),
-            ThinkingFramework::SWOT => self.process_swot(thought),
+        match self.framework {
+            ThinkingMode::Ooda => self.process_ooda(thought, thought_number),
+            ThinkingMode::Socratic => self.process_socratic(thought),
+            ThinkingMode::FirstPrinciples => self.process_first_principles(thought),
+            ThinkingMode::Systems => self.process_systems(thought),
+            ThinkingMode::RootCause => self.process_root_cause(thought, thought_number),
+            ThinkingMode::Swot => self.process_swot(thought),
         }
     }
 
@@ -174,7 +314,7 @@ impl FrameworkProcessor {
         };
 
         FrameworkResult {
-            _framework: self.framework.clone(),
+            _framework: self.framework,
             prompts,
             insights: vec![format!("OODA Stage: {}", stage)],
             _metadata: Some(serde_json::json!({
@@ -194,7 +334,7 @@ impl FrameworkProcessor {
         ];
 
         FrameworkResult {
-            _framework: self.framework.clone(),
+            _framework: self.framework,
             prompts,
             insights: vec!["Question your assumptions and examine evidence".to_string()],
             _metadata: Some(serde_json::json!({
@@ -214,7 +354,7 @@ impl FrameworkProcessor {
         ];
 
         FrameworkResult {
-            _framework: self.framework.clone(),
+            _framework: self.framework,
             prompts,
             insights: vec!["Break down to fundamental truths and reason upward".to_string()],
             _metadata: Some(serde_json::json!({
@@ -234,7 +374,7 @@ impl FrameworkProcessor {
         ];
 
         FrameworkResult {
-            _framework: self.framework.clone(),
+            _framework: self.framework,
             prompts,
             insights: vec!["Consider interconnections and system-wide effects".to_string()],
             _metadata: Some(serde_json::json!({
@@ -253,7 +393,7 @@ impl FrameworkProcessor {
         let prompts = vec![prompt, "What evidence supports this cause?".to_string()];
 
         FrameworkResult {
-            _framework: self.framework.clone(),
+            _framework: self.framework,
             prompts,
             insights: vec![format!("Root cause analysis - Why #{}", why_number)],
             _metadata: Some(serde_json::json!({
@@ -273,7 +413,7 @@ impl FrameworkProcessor {
         ];
 
         FrameworkResult {
-            _framework: self.framework.clone(),
+            _framework: self.framework,
             prompts,
             insights: vec!["Analyze internal and external factors systematically".to_string()],
             _metadata: Some(serde_json::json!({
@@ -287,7 +427,7 @@ impl FrameworkProcessor {
 /// Result of framework processing
 #[derive(Debug)]
 pub struct FrameworkResult {
-    pub _framework: ThinkingFramework,
+    pub _framework: ThinkingMode,
     pub prompts: Vec<String>,
     pub insights: Vec<String>,
     pub _metadata: Option<serde_json::Value>,
@@ -298,14 +438,14 @@ pub struct FrameworkVisual;
 
 impl FrameworkVisual {
     /// Display framework information with colored output
-    pub fn display_framework_start(framework: &ThinkingFramework) {
+    pub fn display_framework_start(framework: &ThinkingMode) {
         let icon = match framework {
-            ThinkingFramework::OODA => "🎯",
-            ThinkingFramework::Socratic => "❓",
-            ThinkingFramework::FirstPrinciples => "🔬",
-            ThinkingFramework::Systems => "🌐",
-            ThinkingFramework::RootCause => "🔍",
-            ThinkingFramework::SWOT => "📊",
+            ThinkingMode::Ooda => "🎯",
+            ThinkingMode::Socratic => "❓",
+            ThinkingMode::FirstPrinciples => "🔬",
+            ThinkingMode::Systems => "🌐",
+            ThinkingMode::RootCause => "🔍",
+            ThinkingMode::Swot => "📊",
         };
         eprintln!("   {} {}", icon, framework.name().bright_yellow());
     }
@@ -331,5 +471,116 @@ impl FrameworkVisual {
                 eprintln!("   {} {}", "💡".bright_yellow(), insight.yellow());
             }
         }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// StuckTracker: cycle through modes when blocked
+// ───────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StuckTracker {
+    pub chain_id: String,
+    pub attempted: ThinkingSet,
+    pub current_cycle: usize,
+}
+
+impl StuckTracker {
+    // Intentionally excludes SWOT from the cycle.
+    pub const CYCLE_ORDER: [ThinkingMode; 5] = [
+        ThinkingMode::FirstPrinciples,
+        ThinkingMode::Socratic,
+        ThinkingMode::Systems,
+        ThinkingMode::Ooda,
+        ThinkingMode::RootCause,
+    ];
+
+    pub fn new(chain_id: String) -> Self {
+        Self {
+            chain_id,
+            attempted: ThinkingSet::default(),
+            current_cycle: 0,
+        }
+    }
+
+    pub fn next_approach(&mut self) -> ThinkingMode {
+        if let Some(&mode) = Self::CYCLE_ORDER
+            .iter()
+            .find(|m| !self.attempted.0.contains(**m))
+        {
+            self.attempted.0.insert(mode);
+            return mode;
+        }
+        self.reset_cycle();
+        Self::CYCLE_ORDER[0]
+    }
+
+    pub fn mark_attempted(&mut self, mode: ThinkingMode) {
+        self.attempted.0.insert(mode);
+    }
+
+    pub fn reset_cycle(&mut self) {
+        self.current_cycle = self.current_cycle.saturating_add(1);
+        self.attempted.0 = EnumSet::only(Self::CYCLE_ORDER[0]);
+    }
+
+    pub fn attempts_count(&self) -> usize {
+        self.attempted.0.len()
+    }
+
+    pub fn is_cycle_complete_for_order(&self) -> bool {
+        self.attempted.0.len() == Self::CYCLE_ORDER.len()
+    }
+
+    pub fn ordered_attempts(&self) -> impl Iterator<Item = ThinkingMode> + '_ {
+        Self::CYCLE_ORDER
+            .iter()
+            .copied()
+            .filter(|m| self.attempted.0.contains(*m))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suggested_next_transitions() {
+        assert_eq!(WorkflowState::Stuck.suggested_next(), Some(WorkflowState::Build));
+        assert_eq!(WorkflowState::Debug.suggested_next(), Some(WorkflowState::Build));
+        assert_eq!(WorkflowState::Review.suggested_next(), Some(WorkflowState::Build));
+        assert_eq!(WorkflowState::Build.suggested_next(), Some(WorkflowState::Review));
+        assert_eq!(WorkflowState::Conversation.suggested_next(), None);
+    }
+
+    #[test]
+    fn stuck_tracker_cycles() {
+        let mut tracker = StuckTracker::new("test".to_string());
+        let mut _seen = Vec::new();
+
+        for _ in 0..StuckTracker::CYCLE_ORDER.len() {
+            _seen.push(tracker.next_approach());
+        }
+        assert_eq!(tracker.current_cycle, 0);
+        assert!(tracker.is_cycle_complete_for_order());
+
+        let first_of_new = tracker.next_approach();
+        assert_eq!(tracker.current_cycle, 1);
+        assert_eq!(first_of_new, StuckTracker::CYCLE_ORDER[0]);
+    }
+
+    #[test]
+    fn thinking_set_serde_snake_case_roundtrip() {
+        let mut set = EnumSet::empty();
+        set.insert(ThinkingMode::Socratic);
+        set.insert(ThinkingMode::Ooda);
+
+        let wrapped = ThinkingSet(set);
+        let json = serde_json::to_string(&wrapped).unwrap();
+        assert!(json.contains("\"socratic\""));
+        assert!(json.contains("\"ooda\""));
+
+        let restored: ThinkingSet = serde_json::from_str(&json).unwrap();
+        assert_eq!(wrapped, restored);
     }
 }
