@@ -37,17 +37,21 @@ UI_TRANSPORT=http UI_HTTP_BIND=127.0.0.1:8787 UI_HTTP_PATH=/mcp ./target/release
 ```
 
 ### 3. Cloudflare Tunnel
-**NOT currently automatic - must be started manually**
+Should start automatically via launchd (Homebrew service). If it isn’t, start it and enable it.
 
 ```bash
-# Check if running
-ps aux | grep cloudflared | grep -v grep
+## Using Homebrew services (preferred)
+brew services start cloudflared            # starts and enables at login
+brew services restart cloudflared          # if already installed
 
-# Start as background process
-nohup cloudflared tunnel run > /Users/samuelatagana/Library/Logs/cloudflared.out.log 2> /Users/samuelatagana/Library/Logs/cloudflared.err.log &
-
-# Or try launchd (if it works)
+## Using launchd directly
+# Load/enable the LaunchAgent and kickstart it
+launchctl enable gui/501/homebrew.mxcl.cloudflared
 launchctl bootstrap gui/501 /Users/samuelatagana/Library/LaunchAgents/homebrew.mxcl.cloudflared.plist
+launchctl kickstart -k gui/501/homebrew.mxcl.cloudflared
+
+## Ad‑hoc (fallback)
+nohup cloudflared tunnel run > /Users/samuelatagana/Library/Logs/cloudflared.out.log 2> /Users/samuelatagana/Library/Logs/cloudflared.err.log &
 ```
 
 ## Verification
@@ -82,6 +86,15 @@ https://mcp.samataganaphotography.com/mcp?access_token=<token>
 ```
 
 ## Current Issues
+If you see `error code: 1033` from the remote URL, the Cloudflare tunnel is not connected.
 
-1. Cloudflared launchd service not starting automatically on boot
-2. Need to manually run cloudflared with nohup after each restart
+Runbook:
+- Check LaunchAgent is loaded: `launchctl list | grep homebrew.mxcl.cloudflared`
+- Kick it: `launchctl kickstart -k gui/501/homebrew.mxcl.cloudflared`
+- Or `brew services restart cloudflared`
+- Verify config: `~/.cloudflared/config.yml` must map `mcp.samataganaphotography.com -> http://localhost:8787`
+- Tail logs: `tail -n 100 ~/Library/Logs/cloudflared.err.log`
+
+If the unified server is down:
+- `./scripts/ui_mcp.sh status` / `./scripts/ui_mcp.sh restart`
+- Health: `curl http://127.0.0.1:8787/health` should return `ok`
