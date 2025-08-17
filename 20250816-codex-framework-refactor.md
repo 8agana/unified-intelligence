@@ -218,4 +218,80 @@ Concrete, prioritized, and phrased so a future assistant can resume instantly.
   5) Optional soft override: accept `thinking_mode` or `thinking_set` as hints (kept soft and safe).
 
 - Exact pickup (use this line verbatim to resume):
-  > When you return, please add `ui_remember` examples and a `next_action` snippet to `ui_help`, then wire `StuckTracker` persistence for `framework_state=stuck`.
+> When you return, please add `ui_remember` examples and a `next_action` snippet to `ui_help`, then wire `StuckTracker` persistence for `framework_state=stuck`.
+
+---
+
+## Appendix — Quick Artifacts for Fast Resume
+
+These are compact, copy‑ready snippets so a new assistant (or a future me) can resume instantly without hunting.
+
+- Example: `ui_remember` — action="query" (server may mint chain_id)
+```
+{
+  "tool": "ui_remember",
+  "params": {
+    "action": "query",
+    "thought": "Summarize design risks for the refactor",
+    "chain_id": "remember:… (optional)"
+  }
+}
+```
+
+- Example: `ui_remember` — action="feedback"
+```
+{
+  "tool": "ui_remember",
+  "params": {
+    "action": "feedback",
+    "chain_id": "remember:…",
+    "feedback": "Good summary; missing rollout check and runbook linking.",
+    "continue_next": true
+  }
+}
+```
+
+- Example: `next_action` contract returned after query
+```
+{
+  "next_action": {
+    "tool": "ui_remember",
+    "action": "feedback",
+    "required": ["chain_id", "feedback"],
+    "optional": ["continue_next"]
+  }
+}
+```
+
+- Framework/State glossary (micro)
+  - Framework (WorkflowState): conversation (default, read‑only), debug, build, stuck, review.
+  - ThinkingModes (lenses): first_principles, ooda, systems, root_cause, swot, socratic.
+
+- StuckTracker (planned persistence)
+  - Key: `{instance}:stuck:chain:{chain_id}`
+  - Order: [FirstPrinciples, Socratic, Systems, OODA, RootCause]
+  - Behavior: pick first unattempted, then reset cycle.
+
+- Remote quick runbook (macOS)
+  - Restart server: `UI_BEARER_TOKEN=$(cat .ui_token) ./scripts/ui_mcp.sh restart`
+  - Health (local): `curl http://127.0.0.1:8787/health` → `ok`
+  - Cloudflared: `brew services restart cloudflared` or `launchctl kickstart -k gui/501/homebrew.mxcl.cloudflared`
+  - Health (remote): `curl https://mcp.samataganaphotography.com/health`
+
+- Exact pickup (redundant for convenience)
+  - “When you return, add ui_remember examples + `next_action` to `ui_help`, then wire `StuckTracker` persistence.”
+
+---
+
+## Working Rule — Use `ui_think` Consistently (Thinking + Recording)
+
+To preserve context and make our collaboration auditable and searchable, default to using `ui_think` for both thinking enhancements and activity logging:
+
+- Always capture meaningful reasoning, decisions, and actions with `ui_think`.
+- Set `framework_state` to match intent:
+  - `conversation` (default, read‑only capture), `debug` (problem‑solving), `build` (making changes), `stuck` (blocked; rotate lenses), `review` (assessment/wrap‑up).
+- Use a stable `chain_id` per session/task to thread thoughts; reuse across related steps.
+- Provide `thought_number` / `total_thoughts` when sequencing a planned series; otherwise simple singletons are fine.
+- Add `tags`/`category` when helpful (e.g., technical, strategic, operational) for retrieval.
+- Keep entries purposeful (avoid spam); group micro‑steps into coherent thoughts.
+- At the end of a sequence, add a `review` entry summarizing outcomes, open questions, and next actions.

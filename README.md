@@ -66,6 +66,7 @@ Unified Intelligence is built with and integrates the following:
 - `ui_context`: Store short-lived personal/federation context with embeddings and RediSearch indexing.
 - `ui_memory`: Search/read/update/delete memory across embeddings and text with simple filters.
 - `ui_remember`: Conversational memory flow: T1 user thought -> T2 assistant synthesis -> T3 objective feedback metrics.
+  - Examples below show `next_action` contract for smooth chaining.
 
 ## Getting Started
 
@@ -160,6 +161,50 @@ Unified Intelligence operates as an MCP server. You can interact with it using a
 - Stdio (default): `./target/release/unified-intelligence`
 - HTTP: `UI_TRANSPORT=http UI_HTTP_BIND=127.0.0.1:8787 ./target/release/unified-intelligence`
 
+### Code Examples
+
+- ui_remember — action="query"
+```
+{
+  "tool": "ui_remember",
+  "params": {
+    "action": "query",
+    "thought": "Summarize design risks for the frameworks refactor",
+    "tags": ["design", "risk"]
+  }
+}
+```
+
+- ui_remember — action="feedback"
+```
+{
+  "tool": "ui_remember",
+  "params": {
+    "action": "feedback",
+    "chain_id": "remember:…",
+    "feedback": "Good summary; missing rollout checks and runbook links.",
+    "continue_next": true
+  }
+}
+```
+
+- next_action contract returned after query
+```
+{
+  "next_action": {
+    "tool": "ui_remember",
+    "action": "feedback",
+    "required": ["chain_id", "feedback"],
+    "optional": ["continue_next"]
+  }
+}
+```
+
+Notes:
+- Default `action` is `query`. Omit `chain_id` and the server mints `remember:UUID`.
+- After `feedback`, set `continue_next=true` to suggest another `query`.
+- When `framework_state="stuck"` in `ui_think`, include `chain_id` to enable per-chain StuckTracker persistence and automatic rotation of thinking modes.
+
 ## Protocol Overview
 Unified Intelligence implements the Model Context Protocol (MCP), enabling structured communication with AI agents. It exposes tools for:
 - **`ui_think`:** The primary tool for processing thoughts through various frameworks.
@@ -197,7 +242,7 @@ cargo test
 - **Unexpected Behavior:** Review `tracing` logs for detailed insights into application flow and potential issues.
 
 ### Known Issues
-- Current `cargo check` fails due to type/variant mismatches in `src/frameworks.rs` (e.g., `ThinkingFramework` vs `ThinkingMode`, and enum variant casing). Planned fix on branch `framework-refactor`.
+- Docs may lag new help content periodically; use `ui_help` with `tool` and `topic` for up-to-date parameters and examples.
 - Tests are designed to skip live Redis if unavailable, but logs may mention connection attempts.
 
 ## Links

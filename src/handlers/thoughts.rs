@@ -1,5 +1,7 @@
 use crate::error::Result;
-use crate::frameworks::{FrameworkProcessor, FrameworkVisual, ThinkingMode, WorkflowState};
+use crate::frameworks::{
+    FrameworkProcessor, FrameworkVisual, StuckTracker, ThinkingMode, WorkflowState,
+};
 use crate::models::{ChainMetadata, ThinkResponse, ThoughtRecord, UiThinkParams};
 use crate::repository_traits::{KnowledgeRepository, ThoughtRepository};
 
@@ -15,10 +17,35 @@ impl<R: ThoughtRepository + KnowledgeRepository> ThoughtsHandler for super::Tool
         // Use parsed, forgiving framework_state (defaults to Conversation)
         let state: WorkflowState = params.framework_state;
 
-        // Show framework banner and choose a thinking mode based on state (first recommended), if any
+        // Show framework banner and choose a thinking mode (persisting cycle if stuck)
         self.visual.framework_state(state);
-        // Choose a thinking mode based on state (first recommended), if any
-        let chosen_mode: Option<ThinkingMode> = state.thinking_modes().first().copied();
+        let chosen_mode: Option<ThinkingMode> = if matches!(state, WorkflowState::Stuck) {
+            if let Some(ref chain_id) = params.chain_id {
+                // Persist StuckTracker per chain: {instance}:stuck:chain:{chain_id}
+                let key = format!("{}:stuck:chain:{}", self.instance_id, chain_id);
+                // Load or initialize tracker
+                let mut tracker: StuckTracker = match self
+                    .redis_manager
+                    .json_get::<StuckTracker>(&key, "$")
+                    .await
+                    .ok()
+                    .flatten()
+                {
+                    Some(t) => t,
+                    None => StuckTracker::new(chain_id.clone()),
+                };
+                // Pick next approach and persist
+                let next = tracker.next_approach();
+                let _ = self.redis_manager.json_set(&key, "$", &tracker).await;
+                Some(next)
+            } else {
+                // Fallback to first recommended if no chain
+                state.thinking_modes().first().copied()
+            }
+        } else {
+            // Non-stuck: use the first recommended mode, if any
+            state.thinking_modes().first().copied()
+        };
 
         // Display visual start with framework
         self.visual

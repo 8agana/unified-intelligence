@@ -47,6 +47,7 @@ impl HelpHandler {
         let response = match params.tool.as_deref() {
             Some("ui_think") => self.ui_think_help(&params.topic),
             Some("ui_recall") => self.ui_recall_help(&params.topic),
+            Some("ui_remember") => self.ui_remember_help(&params.topic),
             _ => self.general_help(),
         };
 
@@ -55,7 +56,7 @@ impl HelpHandler {
 
     fn general_help(&self) -> HelpResponse {
         HelpResponse {
-            overview: "UnifiedIntelligence MCP Server - A Redis-backed thought storage and retrieval system with workflow frameworks and internal thinking modes.\n\nAvailable tools:\n• ui_think - Capture and process thoughts with optional chaining and framework_state\n• ui_recall - Retrieve thoughts by ID or chain ID\n• ui_help - Get help information about the tools".to_string(),
+            overview: "UnifiedIntelligence MCP Server - A Redis-backed thought storage and retrieval system with workflow frameworks and internal thinking modes.\n\nAvailable tools:\n• ui_think - Capture and process thoughts with optional chaining and framework_state\n• ui_recall - Retrieve thoughts by ID or chain ID\n• ui_remember - Conversational memory with assistant synthesis + feedback\n• ui_help - Get help information about the tools".to_string(),
             tools: json!({
                 "ui_think": {
                     "description": "Capture and process thoughts with optional chaining support",
@@ -75,6 +76,10 @@ impl HelpHandler {
                         "thought - Retrieve a single thought by ID",
                         "chain - Retrieve all thoughts in a chain"
                     ]
+                },
+                "ui_remember": {
+                    "description": "Conversational memory: store user query, synthesize response, and record feedback",
+                    "purpose": "Single-tool flow with action=\"query\" or action=\"feedback\"; returns next_action contract"
                 },
                 "ui_help": {
                     "description": "Get help information about available tools",
@@ -119,6 +124,79 @@ impl HelpHandler {
                 "Add importance (1-10) and relevance (1-10) scores for prioritization".to_string(),
                 "Use tags and categories to organize thoughts for easier retrieval".to_string(),
                 "The thought_number and total_thoughts help track progress in multi-step thinking".to_string(),
+            ],
+        }
+    }
+
+    fn ui_remember_help(&self, topic: &Option<String>) -> HelpResponse {
+        let parameters = json!({
+            "description": "Conversational memory with two actions: query and feedback",
+            "required_params": {
+                "action": "'query' (default) or 'feedback'",
+                "thought": "User input text (required for query)",
+                "chain_id": "Conversation chain (optional for query; required for feedback)"
+            },
+            "optional_params": {
+                "style": "Synthesis style hint (e.g., deep|chronological)",
+                "tags": "Array of tags for organization",
+                "feedback": "Freeform critique text (required for feedback)",
+                "continue_next": "Bool; if true after feedback, suggests another query"
+            },
+            "flow": "T1 user thought -> T2 synthesized assistant -> T3 feedback/metrics",
+            "notes": [
+                "If chain_id is omitted on query, server mints remember:UUID",
+                "On query, response includes next_action with tool/ui_remember feedback requirements"
+            ]
+        });
+
+        let examples = json!({
+            "query": {
+                "description": "Store a user thought and get assistant synthesis + next_action contract",
+                "params": {
+                    "action": "query",
+                    "thought": "Summarize design risks for the frameworks refactor",
+                    "tags": ["design", "risk"]
+                }
+            },
+            "feedback": {
+                "description": "Attach feedback to the latest assistant synthesis in the chain",
+                "params": {
+                    "action": "feedback",
+                    "chain_id": "remember:…",
+                    "feedback": "Good summary; missing rollout checks and runbook links.",
+                    "continue_next": true
+                }
+            },
+            "next_action_contract": {
+                "description": "Contract returned after a query to guide the next tool call",
+                "example": {
+                    "next_action": {
+                        "tool": "ui_remember",
+                        "action": "feedback",
+                        "required": ["chain_id", "feedback"],
+                        "optional": ["continue_next"]
+                    }
+                }
+            }
+        });
+
+        HelpResponse {
+            overview: "ui_remember - Conversational memory with assistant synthesis and feedback"
+                .to_string(),
+            tools: match topic.as_deref() {
+                Some("parameters") => parameters,
+                Some("examples") => examples,
+                _ => json!({
+                    "parameters": parameters,
+                    "examples": examples
+                }),
+            },
+            examples: json!({}),
+            tips: vec![
+                "Default action is 'query'; omit chain_id to mint one".to_string(),
+                "Use 'feedback' with chain_id to record critique and optionally continue"
+                    .to_string(),
+                "Honor next_action contract fields to avoid parameter drift".to_string(),
             ],
         }
     }
@@ -206,6 +284,7 @@ impl HelpHandler {
                 "Choose frameworks that match your thinking needs".to_string(),
                 "Higher importance scores (8-10) indicate critical insights".to_string(),
                 "Tags should be lowercase and descriptive".to_string(),
+                "When framework_state='stuck', we persist a per-chain StuckTracker in Redis to rotate thinking modes; include chain_id to enable persistence".to_string(),
             ],
         }
     }
