@@ -20,11 +20,12 @@ use crate::models::UiThinkParams;
 use crate::rate_limit::RateLimiter;
 use crate::redis::RedisManager;
 use crate::repository::CombinedRedisRepository;
-use crate::repository_traits::ThoughtRepository;
+use crate::repository_traits::{KnowledgeRepository, ThoughtRepository};
 use crate::synth::Synthesizer;
 use crate::tools::ui_context::{UIContextParams, ui_context_impl};
 use crate::tools::ui_memory::{UiMemoryParams, ui_memory_impl};
 use crate::tools::ui_remember::{UiRememberParams, UiRememberResult};
+use crate::tools::ui_start::{UiStartParams, UiStartResult};
 use crate::validation::InputValidator;
 use bytemuck::cast_slice;
 
@@ -887,6 +888,265 @@ impl UnifiedIntelligenceService {
         let json_part = Content::json(result)
             .map_err(|e| ErrorData::internal_error(format!("JSON encode error: {e}"), None))?;
         Ok(CallToolResult::success(vec![text_part, prompt, json_part]))
+    }
+
+    #[tool(
+        description = "Start a session: summarize previous chain, embed, set TTL, set new chain_id"
+    )]
+    pub async fn ui_start(
+        &self,
+        params: Parameters<UiStartParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
+            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
+            return Err(ErrorData::invalid_params(
+                "Rate limit exceeded. Please slow down your requests.".to_string(),
+                None,
+            ));
+        }
+
+        let p = params.0;
+        let scope = p.scope.unwrap_or_default();
+
+        // 1) Resolve user KG node
+        let node = match self
+            .handlers
+            .repository
+            .get_entity_by_name(&p.user, &scope)
+            .await
+        {
+            Ok(n) => n,
+            Err(e) => return Err(ErrorData::internal_error(e.to_string(), None)),
+        };
+
+        // Read previous session chain_id from attributes (if present)
+        let prev_chain_id: Option<String> = node
+            .attributes
+            .get("current_session_chain_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // 2) Retrieve previous session thoughts (if any)
+        let prev_thoughts = if let Some(ref chain_id) = prev_chain_id {
+            match self
+                .handlers
+                .repository
+                .get_chain_thoughts(&self.instance_id, chain_id)
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!("ui_start: failed to retrieve chain {}: {}", chain_id, e);
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
+        // 3) Summarize previous session into structured 10k summary
+        // Build a prompt using your structure and budget tokens conservatively
+        let summary_schema = r#"
+You are an assistant producing a structured session summary for LLM consumption.
+Return only the summary text, following exactly these sections and headings:
+1) Critical Status & Warnings
+2) Identity & Relationship Dynamics (includes running jokes)
+3) Session Narrative & Context (includes new jokes)
+4) Technical Work In Progress
+5) Technical Work Completed
+6) System Relationships & Architecture
+7) Decisions Made & Rationale
+8) Active Conversations & Threads
+9) Lessons Learned & Insights
+10) Next Actions & Continuation Points
+
+Guidelines:
+- Be faithful to source thoughts; avoid speculation.
+- Keep it self-contained and readable.
+- Target ~10,000 tokens max; compress thoughtfully if needed.
+"#;
+
+        // Convert ThoughtRecord -> simple Thought for synth context
+        let ctx_thoughts: Vec<crate::models::Thought> = prev_thoughts
+            .iter()
+            .map(|t| crate::models::Thought {
+                id: uuid::Uuid::new_v4(),
+                content: t.thought.clone(),
+                category: t.category.clone(),
+                tags: t.tags.clone().unwrap_or_default(),
+                instance_id: self.instance_id.clone(),
+                created_at: chrono::DateTime::parse_from_rfc3339(&t.timestamp)
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+                    .unwrap_or_else(|_| chrono::Utc::now()),
+                updated_at: chrono::Utc::now(),
+                importance: t.importance.unwrap_or(5),
+                relevance: t.relevance.unwrap_or(5),
+                semantic_score: None,
+                temporal_score: None,
+                usage_score: None,
+                combined_score: None,
+            })
+            .collect();
+
+        let groq_api_key = self.config.groq.api_key.clone();
+        let tx = match crate::transport::GroqTransport::new(groq_api_key) {
+            Ok(v) => std::sync::Arc::new(v) as std::sync::Arc<dyn crate::transport::Transport>,
+            Err(e) => return Err(ErrorData::internal_error(e.to_string(), None)),
+        };
+        let synth = crate::synth::GroqSynth::new(
+            tx,
+            self.config.groq.model_fast.clone(),
+            self.config.groq.model_deep.clone(),
+        );
+
+        let intent = crate::models::QueryIntent {
+            original_query: format!(
+                "Produce a structured session summary following the given headings and guidance.\n\n{summary_schema}"
+            ),
+            temporal_filter: None,
+            synthesis_style: Some("deep".to_string()),
+        };
+
+        let synthesized = match synth.synth(&intent, &ctx_thoughts).await {
+            Ok(s) => s,
+            Err(e) => return Err(ErrorData::internal_error(e.to_string(), None)),
+        };
+        let summary_text = synthesized.text.clone();
+
+        // 4) Store summary in RedisJSON with 1h TTL and embed in chunks
+        let summary_key = format!(
+            "{}:ui_start:summary:{}",
+            self.instance_id,
+            prev_chain_id.clone().unwrap_or_else(|| "none".to_string())
+        );
+        if let Err(e) = self
+            .handlers
+            .redis_manager
+            .json_set(
+                &summary_key,
+                "$",
+                &serde_json::json!({
+                    "chain_id": prev_chain_id,
+                    "summary": summary_text,
+                    "created_at": chrono::Utc::now().to_rfc3339(),
+                    "model_used": synthesized.model_used,
+                }),
+            )
+            .await
+        {
+            tracing::error!("ui_start: failed to store summary JSON: {}", e);
+        }
+        // Override TTL to 1 hour
+        if let Ok(mut con) = self.handlers.redis_manager.get_connection().await {
+            let _: () = redis::Cmd::new()
+                .arg("EXPIRE")
+                .arg(&summary_key)
+                .arg(3600)
+                .query_async(&mut *con)
+                .await
+                .unwrap_or(());
+        }
+
+        // Embed summary in chunks (~2000 chars per chunk) with the same TTL
+        let openai_api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
+        if !openai_api_key.is_empty() {
+            let mut start = 0usize;
+            let chunk_size = 2000usize;
+            let bytes = summary_text.as_bytes();
+            while start < bytes.len() {
+                let end = (start + chunk_size).min(bytes.len());
+                let chunk = &summary_text[start..end];
+                if let Ok(embedding) =
+                    generate_openai_embedding(chunk, &openai_api_key, &self.handlers.redis_manager)
+                        .await
+                {
+                    if let Ok(mut con) = self.handlers.redis_manager.get_connection().await {
+                        let emb_key = format!(
+                            "{}:ui_start:emb:{}:{}",
+                            self.instance_id,
+                            prev_chain_id.clone().unwrap_or_else(|| "none".to_string()),
+                            start
+                        );
+                        // Store as binary via bincode
+                        if let Ok(bytes) = bincode::serialize(&embedding) {
+                            let _: () = redis::pipe()
+                                .set(&emb_key, bytes)
+                                .expire(&emb_key, 3600)
+                                .query_async(&mut *con)
+                                .await
+                                .unwrap_or(());
+                        }
+                    }
+                }
+                start = end;
+            }
+        } else {
+            tracing::warn!("OPENAI_API_KEY not set; skipping embeddings in ui_start");
+        }
+
+        // 5) Create new chain_id for current session and update KG
+        let new_chain_id = format!("session:{}", uuid::Uuid::new_v4());
+        let mut updated = node.clone();
+        let mut attrs = updated.attributes.clone();
+        // Maintain session_history as array of chain_ids
+        let mut history: Vec<String> = attrs
+            .get("session_history")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(prev) = prev_chain_id.clone() {
+            if !prev.is_empty() {
+                history.insert(0, prev);
+            }
+        }
+        attrs.insert(
+            "session_history".to_string(),
+            serde_json::Value::Array(history.into_iter().map(serde_json::Value::String).collect()),
+        );
+        attrs.insert(
+            "current_session_chain_id".to_string(),
+            serde_json::Value::String(new_chain_id.clone()),
+        );
+        // Track summary key by previous chain_id
+        let mut summary_map = attrs
+            .get("summary_keys")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
+        summary_map.insert(
+            prev_chain_id.clone().unwrap_or_else(|| "none".to_string()),
+            serde_json::Value::String(summary_key.clone()),
+        );
+        attrs.insert(
+            "summary_keys".to_string(),
+            serde_json::Value::Object(summary_map),
+        );
+        updated.attributes = attrs;
+        if let Err(e) = self
+            .handlers
+            .repository
+            .update_entity(updated.clone())
+            .await
+        {
+            tracing::error!("ui_start: failed to update KG entity: {}", e);
+        }
+
+        // 6) Return structured result with the summary text (MVP)
+        let result = UiStartResult {
+            status: "ok".to_string(),
+            new_chain_id,
+            summary_key,
+            summary_text,
+            model_used: Some(synthesized.model_used),
+            usage_total_tokens: synthesized.usage.and_then(|u| u.total_tokens),
+        };
+        let content = Content::json(result)
+            .map_err(|e| ErrorData::internal_error(format!("JSON encode error: {e}"), None))?;
+        Ok(CallToolResult::success(vec![content]))
     }
 }
 

@@ -48,6 +48,7 @@ impl HelpHandler {
             Some("ui_think") => self.ui_think_help(&params.topic),
             Some("ui_recall") => self.ui_recall_help(&params.topic),
             Some("ui_remember") => self.ui_remember_help(&params.topic),
+            Some("ui_start") => self.ui_start_help(&params.topic),
             _ => self.general_help(),
         };
 
@@ -80,6 +81,10 @@ impl HelpHandler {
                 "ui_remember": {
                     "description": "Conversational memory: store user query, synthesize response, and record feedback",
                     "purpose": "Single-tool flow with action=\"query\" or action=\"feedback\"; returns next_action contract"
+                },
+                "ui_start": {
+                    "description": "Start a session: summarize previous chain, embed, TTL, set new chain_id",
+                    "purpose": "Provides a 10k structured summary for LLM clients and prepares state for the new session"
                 },
                 "ui_help": {
                     "description": "Get help information about available tools",
@@ -342,6 +347,49 @@ impl HelpHandler {
                 "Use 'chain' mode to retrieve entire thought sequences".to_string(),
                 "Chain IDs typically follow format: YYYYMMDD-topic-description".to_string(),
                 "Recalled thoughts include all metadata (timestamps, scores, tags)".to_string(),
+            ],
+        }
+    }
+
+    fn ui_start_help(&self, topic: &Option<String>) -> HelpResponse {
+        let parameters = json!({
+            "description": "Start a new session by generating a 10k structured summary from the previous chain and returning it with a new chain_id.",
+            "required_params": {
+                "user": "User entity name or ID in the Knowledge Graph"
+            },
+            "optional_params": {
+                "model": "Model preference (fast|deep or explicit)",
+                "scope": "Knowledge scope: federation|personal (default: federation)",
+                "summary_tokens": "Target token cap for the summary (default 10000)"
+            },
+            "output": {
+                "new_chain_id": "Chain ID for the new/current session",
+                "summary_key": "Redis key for the cached summary (1h TTL)",
+                "summary_text": "Structured text suitable for LLM clients"
+            }
+        });
+
+        let examples = json!({
+            "start_default": {
+                "params": {"user": "samuel"}
+            }
+        });
+
+        HelpResponse {
+            overview: "ui_start - Session bootstrap: produce a 10k structured summary for LLM clients and set up new session state".to_string(),
+            tools: match topic.as_deref() {
+                Some("parameters") => parameters,
+                Some("examples") => examples,
+                _ => json!({
+                    "parameters": parameters,
+                    "examples": examples
+                }),
+            },
+            examples: json!({}),
+            tips: vec![
+                "Summary JSON is stored with 1h TTL and chunk embeddings for retrieval".to_string(),
+                "KG attributes maintained: current_session_chain_id, session_history, summary_keys".to_string(),
+                "Initial MVP returns only the 10k summary; expanded multi-summary synthesis can be added later".to_string(),
             ],
         }
     }
