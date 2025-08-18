@@ -1,3 +1,7 @@
+/// Main entry point module for the Unified Intelligence MCP implementation.
+/// 
+/// This file sets up the server, handles transports (HTTP and stdio), and configures authentication.
+/// It uses Tokio for async runtime and integrates with rmcp for service handling.
 use anyhow::Result;
 use rmcp::{
     ServiceExt,
@@ -48,6 +52,13 @@ use crate::service::UnifiedIntelligenceService;
 use std::sync::Arc; // Import Arc
 
 #[tokio::main]
+/// The entry point for the Unified Intelligence MCP server.
+/// 
+/// This function loads the configuration, sets up the service, and initializes transports
+/// (HTTP and/or stdio) based on environment variables. It handles graceful shutdown on signals.
+///
+/// # Errors
+/// Returns an error if configuration loading or service startup fails.
 async fn main() -> Result<()> {
     // Initialize tracing to stderr for MCP compatibility
     tracing_subscriber::fmt()
@@ -128,6 +139,18 @@ async fn main() -> Result<()> {
     }
 }
 
+/// Middleware function for requiring bearer token authentication.
+/// 
+/// This checks for a valid Bearer token in the Authorization header or as a query parameter
+/// (fallback for clients that can't set headers). Skips check for /health endpoint.
+/// 
+/// # Parameters
+/// - `expected`: The expected token value.
+/// - `req`: The incoming request.
+/// - `next`: The next middleware or handler in the chain.
+/// 
+/// # Returns
+/// Proceeds to the next handler if authorized, otherwise returns 401 Unauthorized.
 async fn require_bearer(
     State(expected): State<Arc<String>>,
     req: Request<Body>,
