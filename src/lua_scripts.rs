@@ -35,29 +35,25 @@ end
 -- Store the thought as JSON
 redis.call('JSON.SET', KEYS[1], '.', ARGV[1])
 
--- Set 7-day TTL on the thought
-redis.call('EXPIRE', KEYS[1], 604800)
+-- No TTL on the thought (persist)
 
 -- Add to bloom filter using BF.ADD
 redis.call('BF.ADD', bloom_key, uuid)
 
--- Set 7-day TTL on bloom filter
-redis.call('EXPIRE', bloom_key, 604800)
+-- No TTL on bloom filter (persist)
 
 -- Update time series metrics
 local ts_key = KEYS[3]
 local timestamp = tonumber(ARGV[3])
 redis.call('TS.INCRBY', ts_key, 1, 'TIMESTAMP', timestamp)
 
--- Set 7-day TTL on time series
-redis.call('EXPIRE', ts_key, 604800)
+-- No TTL on time series (persist)
 
 -- Add to chain if chain_id is provided
 if ARGV[4] and ARGV[4] ~= '' then
     local chain_key = KEYS[4]
     redis.call('RPUSH', chain_key, uuid)
-    -- Set 7-day TTL on chain
-    redis.call('EXPIRE', chain_key, 604800)
+    -- No TTL on chain (persist)
 end
 
 return 'OK'

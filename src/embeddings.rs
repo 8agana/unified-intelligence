@@ -39,11 +39,8 @@ pub async fn generate_openai_embedding(
         .ok_or_else(|| UnifiedIntelligenceError::Other(anyhow::anyhow!("No embeddings returned")))?
         .embedding;
 
-    // Cache the embedding for 7 days
-    if let Err(e) = redis_manager
-        .set_cached_embedding(text, &embedding, 86400 * 7)
-        .await
-    {
+    // Cache the embedding persistently (no TTL)
+    if let Err(e) = redis_manager.set_cached_embedding(text, &embedding).await {
         warn!("Failed to cache embedding: {}", e);
     }
 

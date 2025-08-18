@@ -299,8 +299,7 @@ impl UnifiedIntelligenceService {
                     "importance?": "string",
                     "chain_id?": "string",
                     "thought_id?": "string",
-                    "instance_id?": "string",
-                    "ttl_seconds?": "number"
+                    "instance_id?": "string"
                 },
                 "aliases": {
                     "personal": ["local", "instance", "private", "provide"],
@@ -361,7 +360,7 @@ impl UnifiedIntelligenceService {
                     "filters?": {"tags?": "string[]", "importance?": "string", "chain_id?": "string", "thought_id?": "string"},
                     "options?": {"limit?": "number", "offset?": "number", "k?": "number", "search_type?": "string"},
                     "targets?": {"keys?": "string[]"},
-                    "update?": {"content?": "string", "tags?": "string[]", "importance?": "string", "chain_id?": "string", "thought_id?": "string", "ttl_seconds?": "number"}
+                    "update?": {"content?": "string", "tags?": "string[]", "importance?": "string", "chain_id?": "string", "thought_id?": "string"}
                 },
                 "examples": [
                     {"action": "search", "query": "vector db", "scope": "all"},
@@ -890,9 +889,7 @@ impl UnifiedIntelligenceService {
         Ok(CallToolResult::success(vec![text_part, prompt, json_part]))
     }
 
-    #[tool(
-        description = "Start a session: summarize previous chain, embed, set TTL, set new chain_id"
-    )]
+    #[tool(description = "Start a session: summarize previous chain, embed, and set new chain_id")]
     pub async fn ui_start(
         &self,
         params: Parameters<UiStartParams>,
@@ -1013,7 +1010,7 @@ Guidelines:
         };
         let summary_text = synthesized.text.clone();
 
-        // 4) Store summary in RedisJSON with 1h TTL and embed in chunks
+        // 4) Store summary JSON (no TTL); embed in chunks with no TTL
         let summary_key = format!(
             "{}:ui_start:summary:{}",
             self.instance_id,
@@ -1036,18 +1033,9 @@ Guidelines:
         {
             tracing::error!("ui_start: failed to store summary JSON: {}", e);
         }
-        // Override TTL to 1 hour
-        if let Ok(mut con) = self.handlers.redis_manager.get_connection().await {
-            let _: () = redis::Cmd::new()
-                .arg("EXPIRE")
-                .arg(&summary_key)
-                .arg(3600)
-                .query_async(&mut *con)
-                .await
-                .unwrap_or(());
-        }
+        // No TTL set on summary JSON per current policy
 
-        // Embed summary in chunks (~2000 chars per chunk) with the same TTL
+        // Embed summary in chunks (~2000 chars per chunk) with NO TTL (persistent)
         let openai_api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
         if !openai_api_key.is_empty() {
             let mut start = 0usize;
@@ -1069,9 +1057,9 @@ Guidelines:
                         );
                         // Store as binary via bincode
                         if let Ok(bytes) = bincode::serialize(&embedding) {
+                            // Persist embeddings without expiration
                             let _: () = redis::pipe()
                                 .set(&emb_key, bytes)
-                                .expire(&emb_key, 3600)
                                 .query_async(&mut *con)
                                 .await
                                 .unwrap_or(());

@@ -9,8 +9,7 @@ use sha2::{Digest, Sha256};
 use crate::error::{Result, UnifiedIntelligenceError};
 use crate::lua_scripts::{self, LoadedScripts};
 
-/// Default TTL for all Redis writes (7 days in seconds)
-const DEFAULT_TTL_SECONDS: i64 = 604800;
+// TTLs are disabled: all writes persist unless explicitly deleted.
 
 /// Redis connection manager
 #[derive(Clone)]
@@ -81,8 +80,7 @@ impl RedisManager {
         let mut conn = self.get_connection().await?;
         conn.json_set::<_, _, _, ()>(key, path, value).await?;
 
-        // Set TTL for the key (7 days)
-        conn.expire::<_, ()>(key, DEFAULT_TTL_SECONDS).await?;
+        // No TTL on JSON keys
         Ok(())
     }
 
@@ -140,8 +138,7 @@ impl RedisManager {
         let mut conn = self.get_connection().await?;
         conn.sadd::<_, _, ()>(key, member).await?;
 
-        // Set TTL for the key (7 days)
-        conn.expire::<_, ()>(key, DEFAULT_TTL_SECONDS).await?;
+        // No TTL on set members
         Ok(())
     }
 
@@ -570,14 +567,9 @@ impl RedisManager {
         }
     }
 
-    /// Set a cached embedding in Redis with a TTL
+    /// Set a cached embedding in Redis (no TTL)
     #[cfg_attr(not(test), allow(dead_code))]
-    pub async fn set_cached_embedding(
-        &self,
-        text: &str,
-        embedding: &[f32],
-        ttl_seconds: i64,
-    ) -> Result<()> {
+    pub async fn set_cached_embedding(&self, text: &str, embedding: &[f32]) -> Result<()> {
         let mut conn = self.get_connection().await?;
         let key = format!("embedding:{}", hex::encode(Sha256::digest(text))); // Use SHA256 hash of text as key
 
@@ -585,8 +577,7 @@ impl RedisManager {
             UnifiedIntelligenceError::Internal(format!("Failed to serialize embedding: {e}"))
         })?;
 
-        conn.set_ex::<_, _, ()>(&key, bytes, ttl_seconds as u64)
-            .await?;
+        conn.set::<_, _, ()>(&key, bytes).await?;
         Ok(())
     }
 

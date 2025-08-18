@@ -629,11 +629,10 @@ impl KnowledgeRepository for RedisKnowledgeRepository {
             "timestamp": chrono::Utc::now().to_rfc3339()
         });
 
-        let _: () = redis::AsyncCommands::set_ex(
+        let _: () = redis::AsyncCommands::set(
             &mut conn,
             session_key,
             serde_json::to_string(&value).map_err(crate::error::UnifiedIntelligenceError::Json)?,
-            3600,
         )
         .await
         .map_err(|e: RedisError| crate::error::UnifiedIntelligenceError::Redis(e))?;

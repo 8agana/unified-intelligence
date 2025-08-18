@@ -149,7 +149,7 @@ pub async fn ui_context_impl(
     .await
     .map_err(|e| anyhow!("ensure index {index}: {e}"))?;
 
-    // --- Write HASH + TTL ---
+    // --- Write HASH (no TTL) ---
     // Convert f32 vector to raw bytes for RediSearch VECTOR field
     let vector_bytes: Vec<u8> = bytemuck::cast_slice(&vector_f32).to_vec();
     let ts = Utc::now().timestamp();
@@ -172,11 +172,7 @@ pub async fn ui_context_impl(
             .hset(&key, "ts", ts)
             .hset(&key, "vector", vector_bytes);
 
-        if let Some(ttl) = params.ttl_seconds {
-            if ttl > 0 {
-                pipe.expire(&key, ttl as i64);
-            }
-        }
+        // TTLs are disabled; always persist
 
         let _: () = pipe.query_async(&mut *con).await?;
     }
@@ -202,7 +198,7 @@ fn help_text() -> String {
 - type="help":       Show this help message
 
 Required: content (except for help).
-Optional: category (e.g., "session-summary", "decision"), tags[], importance, chain_id, thought_id, ttl_seconds, instance_id.
+Optional: category (e.g., "session-summary", "decision"), tags[], importance, chain_id, thought_id, instance_id.
 
 Aliases for type:
 - personal: "local", "instance", "private", "provide"

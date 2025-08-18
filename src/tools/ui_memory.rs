@@ -101,7 +101,8 @@ pub struct MemoryUpdate {
     pub importance: Option<String>,
     pub chain_id: Option<String>,
     pub thought_id: Option<String>,
-    pub ttl_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>, // Ignored; TTLs disabled
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
@@ -429,11 +430,7 @@ Troubleshooting:
                     if let Some(tid) = &update_data.thought_id {
                         pipe.hset(&new_key, "thought_id", tid);
                     }
-                    if let Some(ttl) = update_data.ttl_seconds {
-                        if ttl > 0 {
-                            pipe.expire(&new_key, ttl as i64);
-                        }
-                    }
+                    // TTLs disabled; do not set expiration
                     pipe.del(key);
                     let _: () = pipe.query_async(&mut *con).await?;
                     updated_pairs.push((key.clone(), new_key));
@@ -452,11 +449,7 @@ Troubleshooting:
                     if has_update {
                         let _: () = pipe.query_async(&mut *con).await?;
                     }
-                    if let Some(ttl) = update_data.ttl_seconds {
-                        if ttl > 0 {
-                            let _: () = con.expire(key, ttl as i64).await?;
-                        }
-                    }
+                    // TTLs disabled; do not set expiration
                     updated_pairs.push((key.clone(), key.clone()));
                 }
             }

@@ -387,7 +387,7 @@ impl HelpHandler {
             },
             examples: json!({}),
             tips: vec![
-                "Summary JSON is stored with 1h TTL and chunk embeddings for retrieval".to_string(),
+                "All data persists; no TTLs set".to_string(),
                 "KG attributes maintained: current_session_chain_id, session_history, summary_keys".to_string(),
                 "Initial MVP returns only the 10k summary; expanded multi-summary synthesis can be added later".to_string(),
             ],
