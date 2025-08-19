@@ -22,7 +22,6 @@ use crate::redis::RedisManager;
 use crate::repository::CombinedRedisRepository;
 use crate::repository_traits::ThoughtRepository;
 use crate::synth::Synthesizer;
-use crate::tools::ui_context::{UIContextParams, ui_context_impl};
 use crate::tools::ui_memory::{UiMemoryParams, ui_memory_impl};
 use crate::tools::ui_remember::{UiRememberParams, UiRememberResult};
 use crate::validation::InputValidator;
@@ -270,70 +269,6 @@ impl UnifiedIntelligenceService {
         }
     }
 
-    #[tool(
-        description = "Store UI context (personal|federation) with optional metadata or return help"
-    )]
-    pub async fn ui_context(
-        &self,
-        params: Parameters<UIContextParams>,
-    ) -> std::result::Result<CallToolResult, ErrorData> {
-        // Rate limit similar to other tools
-        if let Err(e) = self.rate_limiter.check_rate_limit(&self.instance_id).await {
-            tracing::warn!("Rate limit hit for instance {}: {}", self.instance_id, e);
-            return Err(ErrorData::invalid_params(
-                "Rate limit exceeded. Please slow down your requests.",
-                None,
-            ));
-        }
-
-        // Standardized help for ui_context
-        if params.0.kind.eq_ignore_ascii_case("help") {
-            let help = serde_json::json!({
-                "tool": "ui_context",
-                "usage": {
-                    "type": "personal|federation|help",
-                    "content?": "string (required unless type=help)",
-                    "category?": "string (e.g., session-summary, decision, insight)",
-                    "tags?": "string[]",
-                    "importance?": "string",
-                    "chain_id?": "string",
-                    "thought_id?": "string",
-                    "instance_id?": "string"
-                },
-                "aliases": {
-                    "personal": ["local", "instance", "private", "provide"],
-                    "federation": ["federated", "team", "shared", "global"]
-                },
-                "examples": [
-                    {"type": "provide", "content": "Session context", "category": "session-summary"},
-                    {"type": "federation", "content": "Team decision", "category": "decision", "tags": ["architecture"]},
-                    {"type": "help"}
-                ],
-                "troubleshooting": [
-                    "Ensure RediSearch indices are created or allow tool to create them",
-                    "OPENAI_API_KEY must be set for embeddings",
-                    "INSTANCE_ID controls personal index namespace"
-                ]
-            });
-            let content = Content::json(help).map_err(|e| {
-                ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
-            })?;
-            return Ok(CallToolResult::success(vec![content]));
-        }
-
-        let result = ui_context_impl(&self.config, &self.handlers.redis_manager, params.0)
-            .await
-            .map_err(|e| {
-                tracing::error!("ui_context error: {}", e);
-                ErrorData::internal_error(e.to_string(), None)
-            })?;
-
-        let content = Content::json(result).map_err(|e| {
-            ErrorData::internal_error(format!("Failed to create JSON content: {e}"), None)
-        })?;
-
-        Ok(CallToolResult::success(vec![content]))
-    }
 
     #[tool(description = "Search/read/update/delete memory across embeddings with simple filters")]
     pub async fn ui_memory(
