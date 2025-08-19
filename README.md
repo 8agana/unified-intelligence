@@ -65,13 +65,8 @@ Unified Intelligence is built with and integrates the following:
 - `ui_knowledge`: Manage entities and relations in a simple knowledge graph (Redis-backed).
 - `ui_context`: Store short-lived personal/federation context with embeddings and RediSearch indexing.
 - `ui_memory`: Search/read/update/delete memory across embeddings and text with simple filters.
-- `ui_remember`: Conversational memory flow: T1 user thought -> T2 assistant synthesis -> T3 objective feedback metrics.
+- `ui_remember`: Conversational memory flow: T1 user thought -> T2 assistant synthesis -> T3 feedback. Hybrid retrieval (text + KNN via RediSearch). Supports cross-instance retrieval with `search_all_instances=true`.
   - Examples below show `next_action` contract for smooth chaining.
-- `ui_start`: Session bootstrap tool that generates structured 10k token summaries from previous session chains.
-  - Reads chain_id from user's Knowledge Graph entity
-  - Produces comprehensive summary with 10 standard sections
-  - Stores summary in Redis with embeddings for future retrieval
-  - Updates KG entity with new session chain_id for continuity
 
 ## Getting Started
 
@@ -170,27 +165,6 @@ Unified Intelligence operates as an MCP server. You can interact with it using a
 
 ### Code Examples
 
-- ui_start — Session bootstrap and summary generation
-```json
-{
-  "tool": "ui_start",
-  "params": {
-    "user": "DT",
-    "scope": "federation"
-  }
-}
-```
-Returns:
-```json
-{
-  "status": "ok",
-  "new_chain_id": "session:UUID",
-  "summary_key": "DT:ui_start:summary:20250817-Session1",
-  "summary_text": "Structured 10-section summary...",
-  "model_used": "llama3-70b-8192",
-  "usage_total_tokens": 1234
-}
-```
 
 - ui_remember — action="query"
 ```
@@ -200,6 +174,18 @@ Returns:
     "action": "query",
     "thought": "Summarize design risks for the frameworks refactor",
     "tags": ["design", "risk"]
+  }
+}
+```
+
+- ui_remember — cross-instance search
+```
+{
+  "tool": "ui_remember",
+  "params": {
+    "action": "query",
+    "thought": "vector database sharding",
+    "search_all_instances": true
   }
 }
 ```
@@ -234,37 +220,6 @@ Notes:
 - After `feedback`, set `continue_next=true` to suggest another `query`.
 - When `framework_state="stuck"` in `ui_think`, include `chain_id` to enable per-chain StuckTracker persistence and automatic rotation of thinking modes.
 
-### ui_start Workflow
-The `ui_start` tool enables session continuity by generating comprehensive summaries:
-
-1. **Prerequisites:**
-   - User must have an entity in the Knowledge Graph (created via `ui_knowledge`)
-   - Entity must have `current_session_chain_id` attribute set
-   - Previous session thoughts must exist in Redis under that chain_id
-
-2. **Process:**
-   - Retrieves all thoughts from the specified chain
-   - Sends to Groq for synthesis into 10 standard sections
-   - Stores summary in Redis at `{user}:ui_start:summary:{chain_id}`
-   - Optionally generates embeddings for semantic retrieval
-   - Updates KG entity with new session chain_id
-
-3. **Standard Summary Sections:**
-   1. Critical Status & Warnings
-   2. Identity & Relationship Dynamics
-   3. Session Narrative & Context
-   4. Technical Work In Progress
-   5. Technical Work Completed
-   6. System Relationships & Architecture
-   7. Decisions Made & Rationale
-   8. Active Conversations & Threads
-   9. Lessons Learned & Insights
-   10. Next Actions & Continuation Points
-
-4. **Automation Support:**
-   - Can be called at session start to retrieve context
-   - Supports batch processing of historical chains
-   - Enables federation-wide session handoffs
 
 ## Protocol Overview
 Unified Intelligence implements the Model Context Protocol (MCP), enabling structured communication with AI agents. It exposes tools for:

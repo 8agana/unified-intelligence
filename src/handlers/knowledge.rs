@@ -2,12 +2,15 @@ use chrono::Utc;
 use tracing;
 use uuid::Uuid;
 
+use crate::config::Config;
+use crate::embeddings::generate_openai_embedding;
 use crate::error::Result;
 use crate::models::{
     KnowledgeNode, KnowledgeRelation, KnowledgeResponse, NodeMetadata, RelationMetadata,
     UiKnowledgeParams,
 };
 use crate::repository_traits::{KnowledgeRepository, ThoughtRepository};
+use bytemuck::cast_slice;
 
 /// Trait for knowledge graph operations
 pub trait KnowledgeHandler {
@@ -16,6 +19,73 @@ pub trait KnowledgeHandler {
         &self,
         params: UiKnowledgeParams,
     ) -> crate::error::Result<KnowledgeResponse>;
+}
+
+// Local helper to ensure an HNSW RediSearch index exists for HASH prefixes
+async fn ensure_index_hash_hnsw(
+    redis_manager: &crate::redis::RedisManager,
+    index: &str,
+    prefix: &str,
+    dims: usize,
+    m: u32,
+    ef_construction: u32,
+) -> std::result::Result<bool, redis::RedisError> {
+    let mut con = redis_manager.get_connection().await.map_err(|e| match e {
+        crate::error::UnifiedIntelligenceError::Redis(e) => e,
+        other => redis::RedisError::from(std::io::Error::other(other.to_string())),
+    })?;
+
+    let info: redis::RedisResult<redis::Value> = redis::cmd("FT.INFO")
+        .arg(index)
+        .query_async(&mut *con)
+        .await;
+    if info.is_ok() {
+        return Ok(false);
+    }
+
+    let create_res: redis::RedisResult<()> = redis::cmd("FT.CREATE")
+        .arg(index)
+        .arg("ON")
+        .arg("HASH")
+        .arg("PREFIX")
+        .arg(1)
+        .arg(prefix)
+        .arg("SCHEMA")
+        .arg("content")
+        .arg("TEXT")
+        .arg("tags")
+        .arg("TAG")
+        .arg("SEPARATOR")
+        .arg(",")
+        .arg("category")
+        .arg("TEXT")
+        .arg("importance")
+        .arg("TEXT")
+        .arg("chain_id")
+        .arg("TEXT")
+        .arg("thought_id")
+        .arg("TEXT")
+        .arg("ts")
+        .arg("NUMERIC")
+        .arg("SORTABLE")
+        .arg("vector")
+        .arg("VECTOR")
+        .arg("HNSW")
+        .arg("6")
+        .arg("TYPE")
+        .arg("FLOAT32")
+        .arg("DIM")
+        .arg(dims)
+        .arg("DISTANCE_METRIC")
+        .arg("COSINE")
+        .arg("M")
+        .arg(m)
+        .arg("EF_CONSTRUCTION")
+        .arg(ef_construction)
+        .query_async(&mut *con)
+        .await;
+
+    create_res.map(|_| true)
 }
 
 impl<R: ThoughtRepository + KnowledgeRepository> KnowledgeHandler for super::ToolHandlers<R> {
@@ -99,6 +169,69 @@ impl<R: ThoughtRepository + KnowledgeRepository> super::ToolHandlers<R> {
         self.repository
             .update_name_index(&name, &node.id, &scope)
             .await?;
+
+        // Embed-on-create (best-effort)
+        if let Ok(openai_key) = std::env::var("OPENAI_API_KEY") {
+            if !openai_key.is_empty() {
+                let config = Config::load();
+                let dims = config.openai.embedding_dimensions;
+                let index = format!("idx:{}:kg_entity", self.instance_id);
+                let prefix = format!("{}:embeddings:kg_entity:", self.instance_id);
+                let _ = ensure_index_hash_hnsw(
+                    &self.redis_manager,
+                    &index,
+                    &prefix,
+                    dims,
+                    config.redis_search.hnsw.m,
+                    config.redis_search.hnsw.ef_construction,
+                )
+                .await;
+
+                // Compact text for embedding
+                let mut text = node.display_name.clone();
+                if !node.tags.is_empty() {
+                    text.push_str(" | tags: ");
+                    text.push_str(&node.tags.join(", "));
+                }
+                if !node.attributes.is_empty() {
+                    if let Ok(snapshot) = serde_json::to_string(&node.attributes) {
+                        let snap = snapshot.chars().take(400).collect::<String>();
+                        text.push_str(" | attrs: ");
+                        text.push_str(&snap);
+                    }
+                }
+
+                if let Ok(embedding) =
+                    generate_openai_embedding(&text, &openai_key, &self.redis_manager).await
+                {
+                    if embedding.len() == dims {
+                        if let Ok(mut con) = self.redis_manager.get_connection().await {
+                            let key =
+                                format!("{}:embeddings:kg_entity:{}", self.instance_id, node.id);
+                            let vec_bytes: Vec<u8> = cast_slice(&embedding).to_vec();
+                            let ts = chrono::Utc::now().timestamp();
+                            let tags_csv = if node.tags.is_empty() {
+                                String::new()
+                            } else {
+                                node.tags.join(",")
+                            };
+                            let _: () = redis::pipe()
+                                .hset(&key, "content", &text)
+                                .hset(&key, "tags", tags_csv)
+                                .hset(&key, "category", "kg_entity")
+                                .hset(&key, "importance", "")
+                                .hset(&key, "chain_id", "")
+                                .hset(&key, "thought_id", "")
+                                .hset(&key, "ts", ts)
+                                .hset(&key, "vector", vec_bytes)
+                                .query_async(&mut *con)
+                                .await
+                                .unwrap_or(());
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(KnowledgeResponse {
             status: "created".to_string(),
@@ -317,6 +450,68 @@ impl<R: ThoughtRepository + KnowledgeRepository> super::ToolHandlers<R> {
 
         // Save updated entity
         self.repository.update_entity(entity.clone()).await?;
+
+        // Embed-on-update (best-effort)
+        if let Ok(openai_key) = std::env::var("OPENAI_API_KEY") {
+            if !openai_key.is_empty() {
+                let config = Config::load();
+                let dims = config.openai.embedding_dimensions;
+                let index = format!("idx:{}:kg_entity", self.instance_id);
+                let prefix = format!("{}:embeddings:kg_entity:", self.instance_id);
+                let _ = ensure_index_hash_hnsw(
+                    &self.redis_manager,
+                    &index,
+                    &prefix,
+                    dims,
+                    config.redis_search.hnsw.m,
+                    config.redis_search.hnsw.ef_construction,
+                )
+                .await;
+
+                let mut text = entity.display_name.clone();
+                if !entity.tags.is_empty() {
+                    text.push_str(" | tags: ");
+                    text.push_str(&entity.tags.join(", "));
+                }
+                if !entity.attributes.is_empty() {
+                    if let Ok(snapshot) = serde_json::to_string(&entity.attributes) {
+                        let snap = snapshot.chars().take(400).collect::<String>();
+                        text.push_str(" | attrs: ");
+                        text.push_str(&snap);
+                    }
+                }
+
+                if let Ok(embedding) =
+                    generate_openai_embedding(&text, &openai_key, &self.redis_manager).await
+                {
+                    if embedding.len() == dims {
+                        if let Ok(mut con) = self.redis_manager.get_connection().await {
+                            let key =
+                                format!("{}:embeddings:kg_entity:{}", self.instance_id, entity.id);
+                            let vec_bytes: Vec<u8> = cast_slice(&embedding).to_vec();
+                            let ts = chrono::Utc::now().timestamp();
+                            let tags_csv = if entity.tags.is_empty() {
+                                String::new()
+                            } else {
+                                entity.tags.join(",")
+                            };
+                            let _: () = redis::pipe()
+                                .hset(&key, "content", &text)
+                                .hset(&key, "tags", tags_csv)
+                                .hset(&key, "category", "kg_entity")
+                                .hset(&key, "importance", "")
+                                .hset(&key, "chain_id", "")
+                                .hset(&key, "thought_id", "")
+                                .hset(&key, "ts", ts)
+                                .hset(&key, "vector", vec_bytes)
+                                .query_async(&mut *con)
+                                .await
+                                .unwrap_or(());
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(KnowledgeResponse {
             status: "updated".to_string(),

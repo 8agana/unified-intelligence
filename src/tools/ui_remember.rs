@@ -60,6 +60,10 @@ pub struct UiRememberParams {
     /// Optional decision to continue after feedback
     #[serde(default)]
     pub continue_next: Option<bool>,
+
+    /// Search across all instance IDs instead of only the current one
+    #[serde(default)]
+    pub search_all_instances: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]

@@ -582,7 +582,7 @@ impl RedisManager {
     }
 
     /// Execute RediSearch FT.SEARCH using Lua script
-    pub async fn search_thoughts_rediseach(
+    pub async fn search_thoughts_redisearch(
         &self,
         index_name: &str,
         query: &str,

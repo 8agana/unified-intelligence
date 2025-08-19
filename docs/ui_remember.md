@@ -26,9 +26,8 @@ Each ui_remember call creates 3 thoughts:
 The hybrid retrieval system combines:
 - **Text Search**: Redis FT.SEARCH over thought indices
 - **Embedding KNN**: OpenAI embeddings searched across:
-  - `idx:{instance}:session-summaries`
-  - `idx:{instance}:important`
-  - `idx:Federation:embeddings`
+  - `idx:{instance}:thought` and `idx:{instance}:kg_entity`
+  - Federation and, when enabled, all other instances via `search_all_instances=true`
 
 #### Ranking Algorithm
 Candidates are scored using:
@@ -62,6 +61,8 @@ Feedback scoring algorithm:
 
 ```rust
 pub struct UiRememberParams {
+    // ...
+    pub search_all_instances: Option<bool>, // When true, search across all instance IDs
     pub thought: String,              // User's query/thought
     pub thought_number: i32,          // Position in conversation
     pub total_thoughts: i32,          // Expected total thoughts

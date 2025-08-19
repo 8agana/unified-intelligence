@@ -193,7 +193,7 @@ impl ThoughtRepository for RedisThoughtRepository {
         let index_name = self.redi_search_index_name(instance);
         let thought_jsons = self
             .redis
-            .search_thoughts_rediseach(&index_name, query, offset, limit)
+            .search_thoughts_redisearch(&index_name, query, offset, limit)
             .await?;
 
         let mut thoughts = Vec::new();
