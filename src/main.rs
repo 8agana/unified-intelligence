@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
                     Arc::new(session_manager),
                     StreamableHttpServerConfig {
                         stateful_mode: true,
-                        sse_keep_alive: Some(Duration::from_secs(15)),
+                        sse_keep_alive: Some(Duration::from_secs(app_config.sse_keepalive)),
                     },
                 );
 
@@ -118,10 +118,12 @@ async fn main() -> Result<()> {
 
             let listener = tokio::net::TcpListener::bind(bind).await?;
             tracing::info!(
+                transport = ?app_config.transport_type(),
                 %bind,
                 path = %path,
+                keepalive = app_config.sse_keepalive,
                 auth = %bearer_token.as_deref().map(|_| "bearer").unwrap_or("none"),
-                "Starting Streamable HTTP MCP server"
+                "Starting HTTP MCP server"
             );
 
             axum::serve(listener, router).await?;
