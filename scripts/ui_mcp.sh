@@ -12,6 +12,12 @@ export UI_HTTP_BIND=${UI_HTTP_BIND:-127.0.0.1:8787}
 export UI_HTTP_PATH=${UI_HTTP_PATH:-/mcp}
 # Optional: UI_BEARER_TOKEN can be provided via environment
 
+# Auto-load bearer token from .ui_token if not set in environment
+if [ -z "${UI_BEARER_TOKEN:-}" ] && [ -f ".ui_token" ]; then
+  # Trim whitespace/newlines to avoid header issues
+  export UI_BEARER_TOKEN="$(tr -d '\r\n' < .ui_token)"
+fi
+
 ensure_built() {
   if [ ! -x "$BIN" ]; then
     echo "[ui_mcp] Building release binary..."
@@ -42,7 +48,13 @@ start() {
   fi
   ensure_built
   ensure_logs
-  echo "[ui_mcp] Starting ${APP} on ${UI_HTTP_BIND}${UI_HTTP_PATH} (transport=${UI_TRANSPORT})"
+  local auth_mode
+  if [ -n "${UI_BEARER_TOKEN:-}" ]; then
+    auth_mode="bearer"
+  else
+    auth_mode="none"
+  fi
+  echo "[ui_mcp] Starting ${APP} on ${UI_HTTP_BIND}${UI_HTTP_PATH} (transport=${UI_TRANSPORT}, auth=${auth_mode})"
   nohup "$BIN" >> "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   sleep 0.5
@@ -97,4 +109,3 @@ case "${1:-start}" in
   status) status ;;
   *) echo "Usage: $0 {start|stop|restart|status}"; exit 2 ;;
 esac
-

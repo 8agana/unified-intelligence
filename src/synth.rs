@@ -61,7 +61,12 @@ impl Synthesizer for GroqSynth {
         // This is a simplified token limit enforcement. A more robust solution would use a tokenizer.
         let mut context = String::new();
         let mut current_tokens = 0;
-        const MAX_CONTEXT_TOKENS: usize = 1000; // Approximate token limit for context
+        // Use larger limit for deep synthesis (comprehensive summaries)
+        let max_context_tokens = if intent.synthesis_style == Some("deep".to_string()) {
+            6000 // For comprehensive summaries like ui_start
+        } else {
+            1000 // Default for regular queries
+        };
 
         for thought in sorted_memories.iter().rev() {
             // Iterate in reverse to get newest first, but add oldest first to context
@@ -71,7 +76,7 @@ impl Synthesizer for GroqSynth {
             );
             // Simple approximation: 1 token ~ 4 characters
             let thought_tokens = thought_str.len() / 4;
-            if current_tokens + thought_tokens > MAX_CONTEXT_TOKENS {
+            if current_tokens + thought_tokens > max_context_tokens {
                 break; // Stop if adding this thought exceeds the limit
             }
             context.insert_str(0, &thought_str); // Prepend to keep oldest first
@@ -104,7 +109,11 @@ impl Synthesizer for GroqSynth {
             model,
             messages: vec![system_message, user_message],
             temperature: 0.3,
-            max_tokens: 1500,      // Adjust as needed
+            max_tokens: if intent.synthesis_style == Some("deep".to_string()) {
+                2000 // More tokens for comprehensive summaries
+            } else {
+                1500 // Default for regular synthesis
+            },
             response_format: None, // No specific format needed for synthesis
         };
 

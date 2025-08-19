@@ -356,7 +356,7 @@ impl UnifiedIntelligenceService {
                 "usage": {
                     "action": "search|read|update|delete|help",
                     "query?": "string",
-                    "scope?": "all|personal|federation",
+                    "scope?": "all|session-summaries|important|federation",
                     "filters?": {"tags?": "string[]", "importance?": "string", "chain_id?": "string", "thought_id?": "string"},
                     "options?": {"limit?": "number", "offset?": "number", "k?": "number", "search_type?": "string"},
                     "targets?": {"keys?": "string[]"},
@@ -364,6 +364,7 @@ impl UnifiedIntelligenceService {
                 },
                 "examples": [
                     {"action": "search", "query": "vector db", "scope": "all"},
+                    {"action": "search", "query": "session summary", "scope": "session-summaries"},
                     {"action": "read", "targets": {"keys": ["CC:embeddings:important:abc123"]}},
                     {"action": "help"}
                 ],
@@ -1010,7 +1011,7 @@ Guidelines:
         };
         let summary_text = synthesized.text.clone();
 
-        // 4) Store summary JSON (no TTL); embed in chunks with no TTL
+        // 4) Store summary JSON (no TTL); embed in chunks as HASH docs with no TTL
         let summary_key = format!(
             "{}:ui_start:summary:{}",
             self.instance_id,
@@ -1035,7 +1036,21 @@ Guidelines:
         }
         // No TTL set on summary JSON per current policy
 
-        // Embed summary in chunks (~2000 chars per chunk) with NO TTL (persistent)
+        // Ensure RediSearch index for session summaries exists
+        let dims = self.config.openai.embedding_dimensions;
+        let index = format!("idx:{}:session-summaries", self.instance_id);
+        let prefix = format!("{}:embeddings:session-summaries:", self.instance_id);
+        let _ = ensure_index_hash_hnsw(
+            &self.handlers.redis_manager,
+            &index,
+            &prefix,
+            dims,
+            self.config.redis_search.hnsw.m,
+            self.config.redis_search.hnsw.ef_construction,
+        )
+        .await;
+
+        // Embed summary in chunks (~2000 chars per chunk) and store as HASH docs (persistent)
         let openai_api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
         if !openai_api_key.is_empty() {
             let mut start = 0usize;
@@ -1049,21 +1064,31 @@ Guidelines:
                         .await
                 {
                     if let Ok(mut con) = self.handlers.redis_manager.get_connection().await {
-                        let emb_key = format!(
-                            "{}:ui_start:emb:{}:{}",
+                        let key = format!(
+                            "{}:embeddings:session-summaries:{}:{}",
                             self.instance_id,
                             prev_chain_id.clone().unwrap_or_else(|| "none".to_string()),
                             start
                         );
-                        // Store as binary via bincode
-                        if let Ok(bytes) = bincode::serialize(&embedding) {
-                            // Persist embeddings without expiration
-                            let _: () = redis::pipe()
-                                .set(&emb_key, bytes)
-                                .query_async(&mut *con)
-                                .await
-                                .unwrap_or(());
-                        }
+                        let vec_bytes: Vec<u8> = cast_slice(&embedding).to_vec();
+                        let ts = chrono::Utc::now().timestamp();
+                        let tags_csv = "session-summary";
+                        let _: () = redis::pipe()
+                            .hset(&key, "content", chunk)
+                            .hset(&key, "tags", tags_csv)
+                            .hset(&key, "category", "session-summary")
+                            .hset(&key, "importance", "")
+                            .hset(
+                                &key,
+                                "chain_id",
+                                prev_chain_id.clone().unwrap_or_else(|| "none".to_string()),
+                            )
+                            .hset(&key, "thought_id", "")
+                            .hset(&key, "ts", ts)
+                            .hset(&key, "vector", vec_bytes)
+                            .query_async(&mut *con)
+                            .await
+                            .unwrap_or(());
                     }
                 }
                 start = end;
@@ -1135,6 +1160,83 @@ Guidelines:
         let content = Content::json(result)
             .map_err(|e| ErrorData::internal_error(format!("JSON encode error: {e}"), None))?;
         Ok(CallToolResult::success(vec![content]))
+    }
+}
+
+// Ensure an HNSW RediSearch index exists for HASH prefixes
+async fn ensure_index_hash_hnsw(
+    redis_manager: &crate::redis::RedisManager,
+    index: &str,
+    prefix: &str,
+    dims: usize,
+    m: u32,
+    ef_construction: u32,
+) -> std::result::Result<bool, redis::RedisError> {
+    let mut con = redis_manager.get_connection().await.map_err(|e| match e {
+        crate::error::UnifiedIntelligenceError::Redis(e) => e,
+        other => redis::RedisError::from(std::io::Error::other(other.to_string())),
+    })?;
+
+    let info: redis::RedisResult<redis::Value> = redis::cmd("FT.INFO")
+        .arg(index)
+        .query_async(&mut *con)
+        .await;
+    if info.is_ok() {
+        return Ok(false);
+    }
+
+    let create_res: redis::RedisResult<()> = redis::cmd("FT.CREATE")
+        .arg(index)
+        .arg("ON")
+        .arg("HASH")
+        .arg("PREFIX")
+        .arg(1)
+        .arg(prefix)
+        .arg("SCHEMA")
+        .arg("content")
+        .arg("TEXT")
+        .arg("tags")
+        .arg("TAG")
+        .arg("SEPARATOR")
+        .arg(",")
+        .arg("category")
+        .arg("TEXT")
+        .arg("importance")
+        .arg("TEXT")
+        .arg("chain_id")
+        .arg("TEXT")
+        .arg("thought_id")
+        .arg("TEXT")
+        .arg("ts")
+        .arg("NUMERIC")
+        .arg("SORTABLE")
+        .arg("vector")
+        .arg("VECTOR")
+        .arg("HNSW")
+        .arg(10)
+        .arg("TYPE")
+        .arg("FLOAT32")
+        .arg("DIM")
+        .arg(dims)
+        .arg("DISTANCE_METRIC")
+        .arg("COSINE")
+        .arg("M")
+        .arg(m)
+        .arg("EF_CONSTRUCTION")
+        .arg(ef_construction)
+        .query_async(&mut *con)
+        .await;
+
+    match create_res {
+        Ok(()) => Ok(true),
+        Err(e) => {
+            let msg = e.to_string().to_lowercase();
+            if msg.contains("index already exists") {
+                Ok(false)
+            } else {
+                Err(e)
+            }
+        }
     }
 }
 

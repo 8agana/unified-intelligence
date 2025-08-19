@@ -94,6 +94,12 @@ openai:
   embedding_model: text-embedding-3-small
   embedding_dimensions: 1536
 
+# RediSearch vector index configuration
+redis_search:
+  hnsw:
+    m: 16
+    ef_construction: 200
+
 ui_remember:
   preset: balanced-default
   hybrid_weights:

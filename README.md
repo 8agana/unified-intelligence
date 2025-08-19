@@ -67,6 +67,11 @@ Unified Intelligence is built with and integrates the following:
 - `ui_memory`: Search/read/update/delete memory across embeddings and text with simple filters.
 - `ui_remember`: Conversational memory flow: T1 user thought -> T2 assistant synthesis -> T3 objective feedback metrics.
   - Examples below show `next_action` contract for smooth chaining.
+- `ui_start`: Session bootstrap tool that generates structured 10k token summaries from previous session chains.
+  - Reads chain_id from user's Knowledge Graph entity
+  - Produces comprehensive summary with 10 standard sections
+  - Stores summary in Redis with embeddings for future retrieval
+  - Updates KG entity with new session chain_id for continuity
 
 ## Getting Started
 
@@ -112,6 +117,7 @@ Remote MCP (HTTP) controls:
 - `UI_TRANSPORT=http` to enable HTTP transport (stdio is default otherwise).
 - `UI_HTTP_BIND` (e.g., `127.0.0.1:8787`) and `UI_HTTP_PATH` (default `/mcp`).
 - `UI_BEARER_TOKEN` to require `Authorization: Bearer <token>`; for headerless clients, `?access_token=<token>` in the URL is supported.
+ - Convenience: `scripts/ui_mcp.sh` auto-loads `UI_BEARER_TOKEN` from `.ui_token` if present, so `./scripts/ui_mcp.sh restart` keeps auth without exporting env vars. It logs `auth=bearer` when a token is detected.
   
 For `ui_remember` hybrid retrieval, you can tune weights via config/env (see sections below).
 
@@ -150,6 +156,7 @@ Unified Intelligence operates as an MCP server. You can interact with it using a
 ### Remote MCP (HTTP)
 - Start:
   - `UI_TRANSPORT=http UI_HTTP_BIND=127.0.0.1:8787 UI_HTTP_PATH=/mcp UI_BEARER_TOKEN=<token> ./target/release/unified-intelligence`
+  - Or use the convenience script (auto-builds if needed, reads `.ui_token`): `./scripts/ui_mcp.sh start|restart|stop|status`
 - Through Cloudflare Tunnel:
   - Route `mcp.samataganaphotography.com -> http://localhost:8787` in `~/.cloudflared/config.yml`.
 - Claude Desktop URL-only setup:
@@ -162,6 +169,28 @@ Unified Intelligence operates as an MCP server. You can interact with it using a
 - HTTP: `UI_TRANSPORT=http UI_HTTP_BIND=127.0.0.1:8787 ./target/release/unified-intelligence`
 
 ### Code Examples
+
+- ui_start — Session bootstrap and summary generation
+```json
+{
+  "tool": "ui_start",
+  "params": {
+    "user": "DT",
+    "scope": "federation"
+  }
+}
+```
+Returns:
+```json
+{
+  "status": "ok",
+  "new_chain_id": "session:UUID",
+  "summary_key": "DT:ui_start:summary:20250817-Session1",
+  "summary_text": "Structured 10-section summary...",
+  "model_used": "llama3-70b-8192",
+  "usage_total_tokens": 1234
+}
+```
 
 - ui_remember — action="query"
 ```
@@ -204,6 +233,38 @@ Notes:
 - Default `action` is `query`. Omit `chain_id` and the server mints `remember:UUID`.
 - After `feedback`, set `continue_next=true` to suggest another `query`.
 - When `framework_state="stuck"` in `ui_think`, include `chain_id` to enable per-chain StuckTracker persistence and automatic rotation of thinking modes.
+
+### ui_start Workflow
+The `ui_start` tool enables session continuity by generating comprehensive summaries:
+
+1. **Prerequisites:**
+   - User must have an entity in the Knowledge Graph (created via `ui_knowledge`)
+   - Entity must have `current_session_chain_id` attribute set
+   - Previous session thoughts must exist in Redis under that chain_id
+
+2. **Process:**
+   - Retrieves all thoughts from the specified chain
+   - Sends to Groq for synthesis into 10 standard sections
+   - Stores summary in Redis at `{user}:ui_start:summary:{chain_id}`
+   - Optionally generates embeddings for semantic retrieval
+   - Updates KG entity with new session chain_id
+
+3. **Standard Summary Sections:**
+   1. Critical Status & Warnings
+   2. Identity & Relationship Dynamics
+   3. Session Narrative & Context
+   4. Technical Work In Progress
+   5. Technical Work Completed
+   6. System Relationships & Architecture
+   7. Decisions Made & Rationale
+   8. Active Conversations & Threads
+   9. Lessons Learned & Insights
+   10. Next Actions & Continuation Points
+
+4. **Automation Support:**
+   - Can be called at session start to retrieve context
+   - Supports batch processing of historical chains
+   - Enables federation-wide session handoffs
 
 ## Protocol Overview
 Unified Intelligence implements the Model Context Protocol (MCP), enabling structured communication with AI agents. It exposes tools for:
