@@ -16,4 +16,4 @@ BUILDME.md
 .DS_Store
 
 # Logs
-*.log
+*.log*.pid
